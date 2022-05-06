@@ -1,0 +1,6 @@
+<!-- -*- mode: XML -*- -->
+<launch>
+
+  <node pkg="controller" type="controller.py" name="controller" output="screen" />
+
+</launch>

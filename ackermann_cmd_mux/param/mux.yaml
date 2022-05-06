@@ -1,0 +1,43 @@
+# Individual subscriber configuration:
+#   name:           Source name
+#   topic:          The topic that provides ackermann_cmd messages
+#   timeout:        Time in seconds without incoming messages to consider this topic inactive
+#   priority:       Priority: an UNIQUE unsigned integer from 0 (lowest) to MAX_INT
+#   short_desc:     Short description (optional)
+
+# This file creates ROS topics
+
+# Higher 'priority' integers have a higher priorities
+subscribers:
+  - name:        "Safety"
+    topic:       "input/safety"
+    timeout:     0.2
+    priority:    4
+    short_desc:  "Input for safety monitor"
+
+  - name:        "Manual"
+    topic:       "input/manual"
+    timeout:     0.2
+    priority:    3
+    short_desc:  "Input for manual input"
+
+  - name:        "Controller"
+    topic:       "input/controller"
+    timeout:     0.2
+    priority:    2
+    short_desc:  "Input for autonomous controller"
+
+  - name:        "Default"
+    topic:       "input/default"
+    timeout:     0.2
+    priority:    1
+    short_desc:  "Default command (usually the zero command) should come on this stream"
+
+# Add more subscribers here for more inputs
+#  - name:        "Another input stream"
+#    topic:       "input/{input stream name}"
+#    timeout:     0.2
+#    priority:    N
+#    short_desc:  "Your description"
+
+publisher: "output"
