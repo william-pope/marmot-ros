@@ -24,7 +24,7 @@ subscribers:
   - name:        "Controller"
     topic:       "input/controller"
     timeout:     0.2
-    priority:    2
+    priority:    5
     short_desc:  "Input for autonomous controller"
 
   - name:        "Default"

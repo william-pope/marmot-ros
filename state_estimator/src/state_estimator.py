@@ -11,15 +11,13 @@ class StateEstimator:
             PoseStamped, 
             queue_size=1)
 
-        self.vicon_sub_ped1 = rospy.Subscriber("/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped1/pose", 
+        # ISSUE: change back to marmot pose
+        self.vrpn_sub_marmot_pose = rospy.Subscriber("/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped1/pose", 
             PoseStamped,
-            self.callback)
-
-    def callback(self, pose_msg):
-        self.estimate_state(pose_msg)
+            self.estimate_state)
 
     def estimate_state(self, pose_msg):
-        self.pose_pub.publish(pose_msg)     # correct pose
+        self.pose_pub.publish(pose_msg)
 
 
 if __name__ == '__main__':

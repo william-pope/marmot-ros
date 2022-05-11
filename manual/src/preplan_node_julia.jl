@@ -21,7 +21,9 @@ please enter a number to select a driving plan:
 
 function main()
     init_node("preplan_julia")
-    ctrl_pub = Publisher{AckermannDriveStamped}("/car/mux/ackermann_cmd_mux/input/manual", queue_size=2)
+    ctrl_pub = Publisher{AckermannDriveStamped}(
+        "/car/mux/ackermann_cmd_mux/input/manual",
+        queue_size=2)
 
     while(!is_shutdown())
         op_mode= get_param("/car/mode_select/op_mode")

@@ -170,7 +170,8 @@ include_directories(
 #   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
 
-catkin_install_python(PROGRAMS src/controller.py
+# remember to make files executable with >>chmod a+x script.jl
+install(FILES src/controller.jl
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
