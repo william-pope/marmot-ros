@@ -14,7 +14,8 @@ class StateEstimator:
         # ISSUE: change back to marmot pose
         self.vrpn_sub_marmot_pose = rospy.Subscriber("/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped1/pose", 
             PoseStamped,
-            self.estimate_state)
+            self.estimate_state,
+            queue_size=1)
 
     def estimate_state(self, pose_msg):
         self.pose_pub.publish(pose_msg)
