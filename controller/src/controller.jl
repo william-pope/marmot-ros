@@ -10,6 +10,7 @@ include("/home/adcl/Documents/marmot-algs/HJB-planner/HJB_functions.jl")
 
 @rosimport ackermann_msgs.msg: AckermannDriveStamped
 @rosimport geometry_msgs.msg: PoseStamped
+@rosimport state_estimator.srv.EstState # correct?
 
 rostypegen()
 using .ackermann_msgs.msg
@@ -39,38 +40,27 @@ function main()
     #       - looks like time slowly ticks up
     #       - storing all messages, need to throw out and only keep newest
 
-    # - should action be triggered by callback? seems like it should standalone and call on estimator when needed
-
-    state_est_sub = Subscriber{PoseStamped}(
-        "/car/state_estimator/state_estimator/inferred_pose",
-        run_control,
-        (ctrl_pub, U_HJB, sg, veh,),
-        queue_size=1)
-
     println("controller node initialized")
 
     spin()
 end
 
-# NOTE: new callback isn't initiated until run_control() finishes (good)
-# 
-function run_control(pose_msg::PoseStamped, ctrl_pub, U_HJB, sg, veh)    
+function state_estimator_client()
+    wait_for_service("get_est_state")
+    get_est_state = ServiceProxy{EstState}("get_est_state")
+
+    resp = get_est_state(1)
+
+    s = [resp.x, resp.y, resp.theta]
+
+    return s
+end
+
+
+function run_control(ctrl_pub, U_HJB, sg, veh)    
     dt = 1.0
-    println(pose_msg.header.stamp)
     
-    # ISSUE: y is wrong
-    y = zeros(3)
-    y[1] = pose_msg.pose.position.x
-    y[2] = pose_msg.pose.position.y
-
-    # TO-DO: want to move this (pose->state) to state_estimator() node
-    # TO-DO: need to adjust position from Vicon center to rear axis
-    ori = pose_msg.pose.orientation
-    quat = ReferenceFrameRotations.Quaternion(ori.w, ori.x, ori.y, ori.z);
-    eul = ReferenceFrameRotations.quat_to_angle(quat, :XYZ)
-    y[3] = eul.a3 + pi/2
-
-    # println("y: ", y)
+    s = state_estimator_client()
 
     # TO-DO: implement new environment structure to hold T_set
     T_xy_set = [[-0.5 4.0];
@@ -80,7 +70,7 @@ function run_control(pose_msg::PoseStamped, ctrl_pub, U_HJB, sg, veh)
 
     T_theta_set = [[-pi, pi]]
 
-    if in_target_set(y, T_xy_set, T_theta_set, veh) == false
+    if in_target_set(s, T_xy_set, T_theta_set, veh) == false
         a = optimal_action_HJB(y, U_HJB, sg, veh)
     else
         a = [0.0, 0.0]
