@@ -1,4 +1,4 @@
-int8 req
+float64 one
 ---
 float64 x
 float64 y
