@@ -1,6 +1,0 @@
-<!-- -*- mode: XML -*- -->
-<launch>
-
-  <node pkg="controller" type="controller.jl" name="controller" output="screen" />
-
-</launch>

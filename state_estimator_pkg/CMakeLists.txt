@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(state_estimator)
+project(state_estimator_pkg)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -54,7 +54,7 @@ find_package(catkin REQUIRED COMPONENTS
 #   Message2.msg
 # )
 
-## Generate services in the 'srv' folder
+# Generate services in the 'srv' folder
 add_service_files(
   FILES
   EstState.srv
@@ -67,7 +67,7 @@ add_service_files(
 #   Action2.action
 # )
 
-## Generate added messages and services with any dependencies listed here
+# Generate added messages and services with any dependencies listed here
 generate_messages(
   DEPENDENCIES
   std_msgs
@@ -170,7 +170,7 @@ include_directories(
 #   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
 
-catkin_install_python(PROGRAMS src/state_estimator_src.py
+catkin_install_python(PROGRAMS src/state_estimator.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

@@ -1,34 +1,35 @@
 #!/usr/bin/env python
 
+import rospy
+from geometry_msgs.msg import PoseStamped
+from state_estimator_pkg.srv import EstState, EstStateResponse
+
 import copy
 import math
 from scipy.spatial.transform import Rotation
-
-import rospy
-from geometry_msgs.msg import PoseStamped
-from state_estimator.srv import EstState, EstStateResponse
 
 
 class StateEstimator:
     global latest_pose_msg
 
     def __init__(self):
-        self.vrpn_sub_marmot_pose = rospy.Subscriber("/car/vrpn_client_ros/vrpn_client_node/ADCL_Marmot/pose", 
+        self.vrpn_sub_marmot_pose = rospy.Subscriber(
+            "/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped1/pose", 
             PoseStamped,
             self.store_pose_msg,
             queue_size=1)
 
-        self.est_state_srv = rospy.Service("/car/state_estimator/get_est_state",
+        self.est_state_srv = rospy.Service(
+            "/car/state_estimator/get_est_state",
             EstState,
             self.estimate_state)
-
-        print("state_estimator node initialized")
 
         return
 
     def store_pose_msg(self, pose_msg):
         global latest_pose_msg
         latest_pose_msg = copy.deepcopy(pose_msg)
+        
         return
 
     def estimate_state(self, req):

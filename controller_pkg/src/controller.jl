@@ -4,18 +4,17 @@
 
 using RobotOS
 using BSON: @load
-using ReferenceFrameRotations
 
 include("/home/adcl/Documents/marmot-algs/HJB-planner/HJB_functions.jl")
 
-@rosimport ackermann_msgs.msg: AckermannDriveStamped
-@rosimport geometry_msgs.msg: PoseStamped
-@rosimport state_estimator.srv: EstState
+@rosimport state_estimator_pkg.srv: EstState
+@rosimport controller_pkg.srv: AckPub
 
 rostypegen()
-using .ackermann_msgs.msg
-using .geometry_msgs.msg
-using .state_estimator.srv
+using .state_estimator_pkg.srv
+using .controller_pkg.srv
+
+# TO-DO: modify srv msg to include execution time
 
 # TO-DO: need to propagate state forward one step when choosing new action
 
@@ -25,21 +24,18 @@ function main()
     @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/veh.bson" veh
 
     init_node("controller")
-    ctrl_pub = Publisher{AckermannDriveStamped}(
-        "/car/mux/ackermann_cmd_mux/input/controller",
-        queue_size=2)
-
-    println("controller node initialized")
 
     end_run = false
     while end_run == false
-        end_run = run_control(ctrl_pub, U_HJB, env, veh) 
+        end_run = run_controller(U_HJB, env, veh) 
     end
 end
 
 # NOTE: is this re-initializing the proxy every time? -> possibly, but doesn't seem to matter
 function state_estimator_client()
     wait_for_service("/car/state_estimator/get_est_state")
+
+    # see if this can be moved up to main()
     est_state_srv = ServiceProxy{EstState}("/car/state_estimator/get_est_state")
 
     req = EstStateRequest(1.0)
@@ -50,46 +46,45 @@ function state_estimator_client()
     return s
 end
 
+function ack_publisher_client(a)
+    wait_for_service("/car/controller/act_ack_pub")
+
+    # see if this can be moved up to main()
+    ack_pub_srv = ServiceProxy{AckPub}("/car/controller/act_ack_pub")
+
+    a_req = AckPubRequest(a[1], a[2])
+    resp = ack_pub_srv(a_req)
+end
+
 # TO-DO: need to delegate publish_control to another node, so that this node can be calculating next action during dt
-function run_control(ctrl_pub, U_HJB, env, veh)    
-    dt = 0.1
+function run_controller(U_HJB, env, veh)    
+    dt = 1.0    # TO-DO: change back
     
     s = state_estimator_client()
-    println("s: ", s)
+    # println("s: ", s)
 
     if in_target_set(s, env, veh) == false && in_workspace(s, env, veh) == true
         a = optimal_action_HJB(s, U_HJB, env, veh)
 
-        a[1] = 0.5*a[1]  # TO-DO: change back
+        a[1] = 0.3*a[1]  # TO-DO: change back
         end_run = false
     else
         a = [0.0, 0.0]
         end_run = true
     end
 
-    println("a: ", a)
-    println("")
+    println("controller: a: ", a)
+    println("controller: requested new action")
 
-    publish_ctrl(ctrl_pub, a, dt)
+    # this command will take as long as the service callback -> don't put sleep in the callback
+    ack_publisher_client(a)
+    for i in 1:40
+        println("controller: free $i")
+    end
+
+    sleep(dt)
 
     return end_run
-end
-
-function publish_ctrl(ctrl_pub, ctrl, dt)
-    dur = Duration(dt)
-    rate = Rate(10)
-    start = get_rostime()
-
-    ctrl_msg = AckermannDriveStamped()
-    ctrl_msg.header.stamp = get_rostime()
-
-    ctrl_msg.drive.speed = ctrl[1]
-    ctrl_msg.drive.steering_angle = ctrl[2]
-
-    while get_rostime()-start < dur
-        publish(ctrl_pub, ctrl_msg)
-        sleep(rate)
-    end
 end
 
 main()

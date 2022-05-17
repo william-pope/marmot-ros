@@ -1,0 +1,7 @@
+<!-- -*- mode: XML -*- -->
+<launch>
+
+  <node pkg="controller_pkg" type="controller.jl" name="controller" output="screen" />
+  <node pkg="controller_pkg" type="ack_publisher.py" name="ack_publisher" output="screen" />
+
+</launch>
