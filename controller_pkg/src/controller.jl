@@ -1,9 +1,8 @@
 #!/usr/bin/env julia
 
-# RobotOS.jl docs: https://jdlangs.github.io/RobotOS.jl/latest/
-
 using RobotOS
-using BSON: @load
+using BSON: @load, @save
+using Dates
 
 include("/home/adcl/Documents/marmot-algs/HJB-planner/HJB_functions.jl")
 
@@ -14,8 +13,6 @@ rostypegen()
 using .state_estimator_pkg.srv
 using .controller_pkg.srv
 
-# TO-DO: modify srv msg to include execution time
-
 # TO-DO: need to propagate state forward one step when choosing new action
 
 function main()
@@ -25,66 +22,75 @@ function main()
 
     init_node("controller")
 
+    Dt = 0.2
+    rate = Rate(1/Dt)
+
     end_run = false
+    a_k = [0.0, 0.0]
+    s_hist = []
+    a_hist = []
+
     while end_run == false
-        end_run = run_controller(U_HJB, env, veh) 
+        a_k1, end_run, s_hist, a_hist = controller(a_k, s_hist, a_hist, U_HJB, env, veh) 
+        a_k = deepcopy(a_k1)
+
+        sleep(rate)
     end
+
+    ack_publisher_client([0.0, 0.0])
+    state_estimator_client(false)
+
+    # TO-DO: add datetime to file name
+    # TO-DO: add time stamp to each entry
+    @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/s_hist.bson" s_hist
+    @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/a_hist.bson" a_hist
+
+    # need to add time stamps (can do later)
 end
 
-# NOTE: is this re-initializing the proxy every time? -> possibly, but doesn't seem to matter
-function state_estimator_client()
+function state_estimator_client(record)
     wait_for_service("/car/state_estimator/get_est_state")
-
-    # see if this can be moved up to main()
     est_state_srv = ServiceProxy{EstState}("/car/state_estimator/get_est_state")
 
-    req = EstStateRequest(1.0)
-    resp = est_state_srv(req)
+    s_resp = est_state_srv(EstStateRequest(record))
 
-    s = [resp.x, resp.y, resp.theta]
+    s = [s_resp.x, s_resp.y, s_resp.theta]
 
     return s
 end
 
 function ack_publisher_client(a)
     wait_for_service("/car/controller/act_ack_pub")
-
-    # see if this can be moved up to main()
     ack_pub_srv = ServiceProxy{AckPub}("/car/controller/act_ack_pub")
 
     a_req = AckPubRequest(a[1], a[2])
     resp = ack_pub_srv(a_req)
 end
 
-# TO-DO: need to delegate publish_control to another node, so that this node can be calculating next action during dt
-function run_controller(U_HJB, env, veh)    
-    dt = 1.0    # TO-DO: change back
+function controller(a_k, s_hist, a_hist, U_HJB, env, veh)  
+    ack_publisher_client(a_k)
+
+    s_k = state_estimator_client(true)
     
-    s = state_estimator_client()
-    # println("s: ", s)
+    # NOTE: should be propagating state/particles here
 
-    if in_target_set(s, env, veh) == false && in_workspace(s, env, veh) == true
-        a = optimal_action_HJB(s, U_HJB, env, veh)
+    if in_target_set(s_k, env, veh) == false && in_workspace(s_k, env, veh) == true
+        a_k1 = optimal_action_HJB(s_k, U_HJB, env, veh)
 
-        a[1] = 0.3*a[1]  # TO-DO: change back
+        a_k1[1] = 0.6*a_k1[1]  # TO-DO: change back
         end_run = false
     else
-        a = [0.0, 0.0]
+        a_k1 = [0.0, 0.0]
         end_run = true
     end
 
-    println("controller: a: ", a)
-    println("controller: requested new action")
+    println("controller: s_k: ", s_k)
+    println("controller: a_k: ", a_k)
 
-    # this command will take as long as the service callback -> don't put sleep in the callback
-    ack_publisher_client(a)
-    for i in 1:40
-        println("controller: free $i")
-    end
+    push!(s_hist, s_k)
+    push!(a_hist, a_k)
 
-    sleep(dt)
-
-    return end_run
+    return a_k1, end_run, s_hist, a_hist
 end
 
 main()
