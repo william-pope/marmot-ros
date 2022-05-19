@@ -28,7 +28,7 @@ class StateEstimator:
         pose_msg_hist = []
 
         self.vrpn_sub_marmot_pose = rospy.Subscriber(
-            "/car/vrpn_client_ros/vrpn_client_node/ADCL_Marmot/pose", 
+            "/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped1/pose", 
             PoseStamped,
             self.store_pose_msg,
             queue_size=1)

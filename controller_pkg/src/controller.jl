@@ -15,6 +15,8 @@ using .state_estimator_pkg.srv
 using .controller_pkg.srv
 
 # TO-DO: need to propagate state forward one step when choosing new action
+# TO-DO: need to set "close to zero" commands to actually be zero (due to floating point errors)
+# TO-DO: set MCTS to run until interrupted by timer
 
 function main()
     init_node("controller")
@@ -31,10 +33,12 @@ function main()
     c_UCB = 8
     slv = Solver(sims, w_max, d_max, c_UCB)
 
-    S = [[-10.0, 10.0],
-    [-10.0, 10.0],
+    # Q: S not even used in MCTS?
+    S = [[-3.5, 3.5],
+    [-7.0, 7.0],
     [-pi, pi]]
 
+    # TO-DO: make these align with HJB, then later with POMDP
     A_v = [-0.751, 1.0]
     A_phi = [-0.5, 0.0, 0.5]
     A = vec([[a_v, a_phi] for a_phi in A_phi, a_v in A_v])
@@ -44,7 +48,7 @@ function main()
     std_v = 0
     std_phi = 0
 
-    Dt = 0.5
+    Dt = 1.0
     rate = Rate(1/Dt)
 
     # execution ---
@@ -54,7 +58,7 @@ function main()
     a_hist = []
 
     while end_run == false
-        a_k1, end_run, s_hist, a_hist = controller(a_k, Dt, s_hist, a_hist, S, A, V_HJB, slv, car_EoM, env, veh) 
+        a_k1, end_run, s_hist, a_hist = controller(a_k, Dt, s_hist, a_hist, S, A, gamma, V_HJB, slv, car_EoM, env, veh) 
         a_k = deepcopy(a_k1)
 
         sleep(rate)
@@ -70,18 +74,18 @@ function main()
     @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/a_hist.bson" a_hist
 end
 
-function controller(a_k, Dt, s_hist, a_hist, S, A, V_HJB, slv::Solver, EoM::Function, env::Environment, veh::Vehicle)  
+function controller(a_k, Dt, s_hist, a_hist, S, A, gamma, V_HJB, slv::Solver, EoM::Function, env::Environment, veh::Vehicle)  
     # sends current action to publisher
     ack_publisher_client(a_k)
+    println("\ncontroller: a_k: ", a_k)
 
     # received current state from estimator
     s_k = state_estimator_client(true)
-
     println("controller: s_k: ", s_k)
-    println("controller: a_k: ", a_k)
     
     # propagates state to next time step
     s_k1 = gen_state(s_k, a_k, 0.0, 0.0, Dt, EoM, veh)
+    println("controller: s_k1: ", s_k1)
 
     # runs MCTS to compute action for next time step
     if in_target_set(s_k1, env, veh) == false && in_workspace(s_k1, env, veh) == true
@@ -93,6 +97,7 @@ function controller(a_k, Dt, s_hist, a_hist, S, A, V_HJB, slv::Solver, EoM::Func
         a_k1 = [0.0, 0.0]
         end_run = true
     end
+    println("controller: a_k1: ", a_k1)
 
     # stores state/action history
     push!(s_hist, s_k)
@@ -115,6 +120,8 @@ end
 function ack_publisher_client(a)
     wait_for_service("/car/controller/act_ack_pub")
     ack_pub_srv = ServiceProxy{AckPub}("/car/controller/act_ack_pub")
+
+    a = [0.0, 0.0] # TO-DO: get rid of this
 
     a_req = AckPubRequest(a[1], a[2])
     resp = ack_pub_srv(a_req)
