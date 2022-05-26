@@ -15,7 +15,7 @@ using .state_estimator_pkg.srv
 using .controller_pkg.srv
 
 # TO-DO: need to propagate state forward one step when choosing new action
-# TO-DO: need to set "close to zero" commands to actually be zero (due to floating point errors)
+# TO-DO: need to set "close to zero" commands to actually be zero (due to floating point errors) (think this causes grinding)
 # TO-DO: set MCTS to run until interrupted by timer
 
 function main()
@@ -34,13 +34,13 @@ function main()
     slv = Solver(sims, w_max, d_max, c_UCB)
 
     # Q: S not even used in MCTS?
-    S = [[-3.5, 3.5],
-    [-7.0, 7.0],
-    [-pi, pi]]
+    S = [[minimum(env.x_grid), maximum(env.x_grid)],
+        [minimum(env.y_grid), maximum(env.y_grid)],
+        [-pi, pi]]
 
     # TO-DO: make these align with HJB, then later with POMDP
-    A_v = [-0.751, 1.0]
-    A_phi = [-0.5, 0.0, 0.5]
+    A_v = [-veh.c_vb+0.01, veh.c_vf]
+    A_phi = [-veh.c_phi, 0.0, veh.c_phi]
     A = vec([[a_v, a_phi] for a_phi in A_phi, a_v in A_v])
 
     gamma = 0.95
@@ -79,7 +79,7 @@ function controller(a_k, Dt, s_hist, a_hist, S, A, gamma, V_HJB, slv::Solver, Eo
     ack_publisher_client(a_k)
     println("\ncontroller: a_k: ", a_k)
 
-    # received current state from estimator
+    # receives current state from estimator
     s_k = state_estimator_client(true)
     println("controller: s_k: ", s_k)
     
