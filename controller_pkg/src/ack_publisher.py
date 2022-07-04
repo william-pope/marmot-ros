@@ -5,6 +5,7 @@ from ackermann_msgs.msg import AckermannDriveStamped
 from controller_pkg.srv import AckPub, AckPubRequest, AckPubResponse
 
 # TO-DO: what is dt required to have smooth actions fron VESC?
+#   - i.e., how often does speed need to be sent to VESC to continuously drive?
 
 class AckPublisher:
     global latest_a_msg
@@ -26,7 +27,7 @@ class AckPublisher:
             AckermannDriveStamped, 
             queue_size=2)
 
-        dt = 0.1
+        dt = 0.05   # 20 Hz
         rate = rospy.Rate(1/dt)
         while True:
             self.publish_to_ackermann(latest_a_msg)
