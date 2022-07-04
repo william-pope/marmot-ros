@@ -34,13 +34,11 @@ function main()
 
     # main loop
     while end_run == false
-        # 1: publishes current action
-        # ISSUE: vehicle not moving
-        #   - input/controller is sending zeros
+        # 1: publishes current action to ESC
         ack_publisher_client(a_k)
         # println("\ncontroller: a_k: ", a_k)
 
-        # 2: receives current state
+        # 2: receives current state from Vicon
         s_k = state_estimator_client(true)
         # println("controller: s_k: ", s_k)
 
@@ -78,10 +76,12 @@ end
 #           - upper = calculate_upper_bound_policy_pomdp_planning
 function controller(s_k, a_k, Dt, EoM::Function, env::Environment, veh::Vehicle)  
     # propagates state to next time step given current action
+    # TO-DO: replace this with belief updater (?)
     s_k1 = deepcopy(s_k)
 
-    # runs tree search to find best action for next time step
+    # runs tree search to find best action at next time step
     if in_target_set(s_k1, env, veh) == false && in_workspace(s_k1, env, veh) == true
+        # TO-DO: replace this with POMDP function
         a_k1 = [0.0, 0.0]
         end_run = false
     else
