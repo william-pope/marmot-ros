@@ -5,6 +5,7 @@ using BSON: @load, @save
 using Dates
 
 include("/home/adcl/Documents/marmot-algs/HJB-planner/HJB_generator_functions.jl")
+include("/home/adcl/Documents/marmot-algs/HJB-planner/HJB_planner_functions.jl")
 
 @rosimport state_estimator_pkg.srv: EstState
 @rosimport controller_pkg.srv: AckPub
@@ -22,9 +23,15 @@ function main()
     @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/U_HJB.bson" U_HJB
     @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/env.bson" env
     @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/veh.bson" veh
+    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/target_mat.bson" target_mat
+    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/obstacle_mat.bson" obstacle_mat
 
-    Dt = 0.5
+    Dt = 0.1
     rate = Rate(1/Dt)
+
+    Am = [[a_v,a_phi] for a_v in [-veh.c_vb, veh.c_vf], a_phi in [-veh.c_phi, 0.0, veh.c_phi]]
+    A = reshape(Am, (length(Am),1))
+    sort!(A, dims=1)
 
     # execution ---
     end_run = false
@@ -38,14 +45,14 @@ function main()
     while end_run == false
         # 1: publishes current action to ESC
         ack_publisher_client(a_k)
-        # println("\ncontroller: a_k: ", a_k)
+        println("\ncontroller: a_k: ", a_k)
 
         # 2: receives current state from Vicon
         s_k = state_estimator_client(true)
         println("controller: s_k: ", s_k)
 
         # 3: calculates next action
-        a_k1, end_run = controller(s_k, a_k, Dt, car_EoM, env, veh) 
+        a_k1, end_run = controller(s_k, a_k, Dt, U_HJB, A, obstacle_mat, car_EoM, env, veh) 
         
         # stores state/action history
         push!(s_hist, s_k)
@@ -81,15 +88,16 @@ end
 #       - solver = DESPOTSolver(..., ARDESPOT.IndependentBounds(lower, upper, ...), ...)
 #           - lower = ARDESPOT.DefaultPolicyLB(FunctionPolicy(calculate_lower_bound_policy_pomdp_planning)))
 #           - upper = calculate_upper_bound_policy_pomdp_planning
-function controller(s_k, a_k, Dt, EoM::Function, env::Environment, veh::Vehicle)  
+function controller(s_k, a_k, Dt, U, A, O, EoM::Function, env::Environment, veh::Vehicle)  
     # propagates state to next time step given current action
     # TO-DO: replace this with belief updater (?)
-    s_k1 = deepcopy(s_k)
+    s_k1 = runge_kutta_4(s_k, a_k, Dt, EoM, veh)
 
     # runs tree search to find best action at next time step
     if in_target_set(s_k1, env, veh) == false && in_workspace(s_k1, env, veh) == true
         # TO-DO: replace this with POMDP function
-        a_k1 = [0.0, 0.0]
+        a_k1 = HJB_action(s_k1, U, A, O, env, veh)
+        println("a_k1: ", a_k1)
         end_run = false
     else
         a_k1 = [0.0, 0.0]

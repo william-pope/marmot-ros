@@ -28,7 +28,7 @@ import csv
 
 class StateEstimator:
     current_veh_msg = []
-    current_ped1_msg = []
+    # current_ped1_msg = []
     # current_ped2_msg = []
     # current_ped3_msg = []
     # current_ped4_msg = []
@@ -37,7 +37,7 @@ class StateEstimator:
     saved_hist = False
 
     hist_veh_msg = []
-    hist_ped1_msg = []
+    # hist_ped1_msg = []
     # hist_ped2_msg = []
     # hist_ped3_msg = []
     # hist_ped4_msg = []
@@ -45,18 +45,18 @@ class StateEstimator:
     def __init__(self):
         # TO-DO: change topic back to Marmot
         self.vrpn_sub_marmot_pose = rospy.Subscriber(
-            "/car/vrpn_client_ros/vrpn_client_node/Wand/pose", 
+            "/car/vrpn_client_ros/vrpn_client_node/ADCL_Marmot/pose", 
             PoseStamped,
             callback=self.store_current_msg,
             callback_args=0,
             queue_size=1)
 
-        self.vrpn_sub_ped1_pose = rospy.Subscriber(
-            "/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped1/pose", 
-            PoseStamped,
-            callback=self.store_current_msg,
-            callback_args=1,
-            queue_size=1)
+        # self.vrpn_sub_ped1_pose = rospy.Subscriber(
+        #     "/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped1/pose", 
+        #     PoseStamped,
+        #     callback=self.store_current_msg,
+        #     callback_args=1,
+        #     queue_size=1)
 
         # self.vrpn_sub_ped2_pose = rospy.Subscriber(
         #     "/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped2/pose", 
@@ -89,10 +89,10 @@ class StateEstimator:
             self.current_veh_msg = copy.deepcopy(pose_msg)
             if self.record_hist == True:
                 self.hist_veh_msg.append(pose_msg)
-        elif vrpn_object == 1:
-            self.current_ped1_msg = copy.deepcopy(pose_msg)
-            if self.record_hist == True:
-                self.hist_ped1_msg.append(pose_msg)
+        # elif vrpn_object == 1:
+        #     self.current_ped1_msg = copy.deepcopy(pose_msg)
+        #     if self.record_hist == True:
+        #         self.hist_ped1_msg.append(pose_msg)
         # elif vrpn_object == 2:
         #     self.current_ped2_msg = copy.deepcopy(pose_msg)
         #     if record_hist == True:
@@ -115,9 +115,9 @@ class StateEstimator:
         if self.record_hist == False and self.saved_hist == False and len(self.hist_veh_msg) > 0: 
             self.save_s_hist()
 
-        current_state = [0]*(3 + 2*(1))
+        current_state = [0]*(3 + 2*(0))
         current_state[0:3] = self.veh_state(self.current_veh_msg)
-        current_state[3:5] = self.ped_state(self.current_ped1_msg)
+        # current_state[3:5] = self.ped_state(self.current_ped1_msg)
         # current_state[5:7] = self.ped_state(self.current_ped2_msg)
         # current_state[7:9] = self.ped_state(self.current_ped3_msg)
         # current_state[9:11] = self.ped_state(self.current_ped4_msg)
@@ -174,13 +174,13 @@ class StateEstimator:
             writer.writerow(s_k)
         f.close()
 
-        # ped1 history
-        f = open("/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/ped1_hist_vrpn.csv", 'w')
-        writer = csv.writer(f)
-        for msg_k in self.hist_ped1_msg:
-            s_k = self.ped_state(msg_k)
-            writer.writerow(s_k)
-        f.close()
+        # # ped1 history
+        # f = open("/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/ped1_hist_vrpn.csv", 'w')
+        # writer = csv.writer(f)
+        # for msg_k in self.hist_ped1_msg:
+        #     s_k = self.ped_state(msg_k)
+        #     writer.writerow(s_k)
+        # f.close()
         
         self.saved_hist = True
         print("save complete")
