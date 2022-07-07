@@ -7,6 +7,7 @@ from state_estimator_pkg.srv import EstState, EstStateResponse
 import copy
 import math
 from scipy.spatial.transform import Rotation
+from datetime import datetime
 import csv
 
 # File Overview:
@@ -24,32 +25,24 @@ import csv
 #   Ped2 x;
 #   ...]
 # - length = 3 + 2*n_peds
-# - should be single state vector that is being continuously updated by each callback
-#   - need to make sure two callbacks don't write at same time (think callbacks lock each other out?)
-#   - could store in separate variables (as PoseStamped), combine into state vector when controller requests state
-#   - 
 
 class StateEstimator:
-    global current_veh_msg
-    global current_ped1_msg
-    # global current_ped2_msg
-    # global current_ped3_msg
-    # global current_ped4_msg
+    current_veh_msg = []
+    current_ped1_msg = []
+    # current_ped2_msg = []
+    # current_ped3_msg = []
+    # current_ped4_msg = []
 
-    # global record
-    # global saved
-    # global pose_msg_hist
+    record_hist = False
+    saved_hist = False
+
+    hist_veh_msg = []
+    hist_ped1_msg = []
+    # hist_ped2_msg = []
+    # hist_ped3_msg = []
+    # hist_ped4_msg = []
 
     def __init__(self):
-        # global record
-        # global saved
-        # global pose_msg_hist
-        
-        # record = False
-        # saved = False
-
-        # pose_msg_hist = []
-
         # TO-DO: change topic back to Marmot
         self.vrpn_sub_marmot_pose = rospy.Subscriber(
             "/car/vrpn_client_ros/vrpn_client_node/Wand/pose", 
@@ -92,59 +85,42 @@ class StateEstimator:
 
     # subscriber callback function
     def store_current_msg(self, pose_msg, vrpn_object):
-        global current_veh_msg
-        global current_ped1_msg
-        # global current_ped2_msg
-        # global current_ped3_msg
-        # global current_ped4_msg
-
         if vrpn_object == 0:
-            current_veh_msg = copy.deepcopy(pose_msg)
+            self.current_veh_msg = copy.deepcopy(pose_msg)
+            if self.record_hist == True:
+                self.hist_veh_msg.append(pose_msg)
         elif vrpn_object == 1:
-            current_ped1_msg = copy.deepcopy(pose_msg)
+            self.current_ped1_msg = copy.deepcopy(pose_msg)
+            if self.record_hist == True:
+                self.hist_ped1_msg.append(pose_msg)
         # elif vrpn_object == 2:
-        #     current_ped2_msg = copy.deepcopy(pose_msg)
+        #     self.current_ped2_msg = copy.deepcopy(pose_msg)
+        #     if record_hist == True:
+        #         hist_ped2_msg.append(pose_msg)
         # elif vrpn_object == 3:
-        #     current_ped3_msg = copy.deepcopy(pose_msg)
+        #     self.current_ped3_msg = copy.deepcopy(pose_msg)
+        #     if record_hist == True:
+        #         hist_ped3_msg.append(pose_msg)
         # elif vrpn_object == 4:
-        #     current_ped4_msg = copy.deepcopy(pose_msg)
-
-        # # recording state history (not required for main execution)
-        # global record
-        # global saved
-        # global pose_msg_hist
-
-        # if record == True:
-        #     pose_msg_hist.append(pose_msg)
-        # elif record == False and len(pose_msg_hist) > 0 and saved == False:
-        #     print(len(pose_msg_hist))
-        #     print("saving VRPN output")
-
-        #     self.save_s_hist(pose_msg_hist)
-        #     saved = True
-        #     print("save complete")
+        #     self.current_ped4_msg = copy.deepcopy(pose_msg)
+        #     if record_hist == True:
+        #         hist_ped4_msg.append(pose_msg)
         
         return
 
     # function called by service
     def estimate_state(self, req):
-        global current_veh_msg
-        global current_ped1_msg
-        # global current_ped2_msg
-        # global current_ped3_msg
-        # global current_ped4_msg
+        self.record_hist = req.record
 
-        # global record
-        # global pose_msg_hist
-
-        # record = req.record
+        if self.record_hist == False and self.saved_hist == False and len(self.hist_veh_msg) > 0: 
+            self.save_s_hist()
 
         current_state = [0]*(3 + 2*(1))
-        current_state[0:3] = self.veh_state(current_veh_msg)
-        current_state[3:5] = self.ped_state(current_ped1_msg)
-        # current_state[5:7] = self.ped_state(current_ped2_msg)
-        # current_state[7:9] = self.ped_state(current_ped3_msg)
-        # current_state[9:11] = self.ped_state(current_ped4_msg)
+        current_state[0:3] = self.veh_state(self.current_veh_msg)
+        current_state[3:5] = self.ped_state(self.current_ped1_msg)
+        # current_state[5:7] = self.ped_state(self.current_ped2_msg)
+        # current_state[7:9] = self.ped_state(self.current_ped3_msg)
+        # current_state[9:11] = self.ped_state(self.current_ped4_msg)
 
         return EstStateResponse(current_state)
 
@@ -172,20 +148,44 @@ class StateEstimator:
         return s
 
     # saves full Vicon history to csv file, called once at end of execution
-    # def save_s_hist(self, pose_msg_hist):
-    #     # TO-DO: add datetime to file name
-    #     # TO-DO: add time stamp to each entry
-    #     f = open("/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/s_hist_vrpn.csv", 'w')
-    #     writer = csv.writer(f)
+    # TO-DO: manage histories from all objects
+    #   - histories not necessarily same length, same time steps (hmm...)
+    #   - see what each length is, might be close enough to not cause issues
+    #   - probably easiest to save in separate files, pull together in analysis script
+    def save_s_hist(self):
+        # veh_secs = datetime.fromtimestamp(self.current_veh_msg.header.stamp.secs)  
+        # veh_nsecs = datetime.fromtimestamp(self.current_veh_msg.header.stamp.nsecs)
+        # ped1_secs = datetime.fromtimestamp(self.current_ped1_msg.header.stamp.secs)  
+        # ped1_nsecs = datetime.fromtimestamp(self.current_ped1_msg.header.stamp.nsecs)
 
-    #     for pose_msg_k in pose_msg_hist:
-    #         s_k = self.msg_to_state(pose_msg_k)
-    #         writer.writerow(s_k)
+        # print(veh_secs)
+        # print(veh_nsecs)
+        # print(ped1_secs)
+        # print(ped1_nsecs)
 
-    #     f.close()
+        # TO-DO: add datetime to file name
+        # TO-DO: add time stamp to each entry
+
+        # veh history
+        f = open("/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/veh_hist_vrpn.csv", 'w')
+        writer = csv.writer(f)
+        for msg_k in self.hist_veh_msg:
+            s_k = self.veh_state(msg_k)
+            writer.writerow(s_k)
+        f.close()
+
+        # ped1 history
+        f = open("/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/ped1_hist_vrpn.csv", 'w')
+        writer = csv.writer(f)
+        for msg_k in self.hist_ped1_msg:
+            s_k = self.ped_state(msg_k)
+            writer.writerow(s_k)
+        f.close()
         
-    #     return
+        self.saved_hist = True
+        print("save complete")
 
+        return
 
 if __name__ == '__main__':
     try:

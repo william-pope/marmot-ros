@@ -32,6 +32,8 @@ function main()
     s_hist = []
     a_hist = []
 
+    step = 1
+
     # main loop
     while end_run == false
         # 1: publishes current action
@@ -42,7 +44,7 @@ function main()
 
         # 2: receives current state
         s_k = state_estimator_client(true)
-        # println("controller: s_k: ", s_k)
+        println("controller: s_k: ", s_k)
 
         # 3: calculates next action
         a_k1, end_run = controller(s_k, a_k, Dt, car_EoM, env, veh) 
@@ -53,6 +55,11 @@ function main()
 
         # passes new action to next loop
         a_k = deepcopy(a_k1)
+
+        if step >= 2*60*4
+            end_run = true
+        end
+        step += 1
 
         # 4: sleeps for remainder of Dt loop
         sleep(rate)
