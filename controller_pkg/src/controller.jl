@@ -23,8 +23,6 @@ function main()
     @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/U_HJB.bson" U_HJB
     @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/env.bson" env
     @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/veh.bson" veh
-    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/target_mat.bson" target_mat
-    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/obstacle_mat.bson" obstacle_mat
 
     Dt = 0.1
     rate = Rate(1/Dt)
@@ -135,8 +133,6 @@ function new_main()
     @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/U_HJB.bson" U_HJB
     @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/env.bson" env
     @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/veh.bson" veh
-    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/target_mat.bson" target_mat
-    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/obstacle_mat.bson" obstacle_mat
 
     Dt = 0.1
     rate = Rate(1/Dt)
@@ -145,10 +141,26 @@ function new_main()
     A = reshape(Am, (length(Am),1))
     sort!(A, dims=1)
 
-    # execution ---
+    # initial tracking ---
+    o_kn1 = []
+    for _ in 1:5
+        o_k = state_estimator_client(true)
+
+        if isempty(o_kn1) == false
+            # update belief
+
+        end
+
+        o_kn1 = deepcopy(o_k)
+
+        sleep(rate)
+    end
+
+    # moving ---
     end_run = false
+    o_kn1 = []
     a_k = [0.0, 0.0]
-    s_hist = []
+    o_hist = []
     a_hist = []
 
     step = 1
@@ -160,17 +172,24 @@ function new_main()
         println("\ncontroller: a_k: ", a_k)
 
         # 2: receives current state from Vicon
-        s_k = state_estimator_client(true)
-        println("controller: s_k: ", s_k)
+        o_k = state_estimator_client(true)
+        println("controller: o_k: ", o_k)
 
-        # 3: calculates next action
-        a_k1, end_run = controller(s_k, a_k, Dt, U_HJB, A, obstacle_mat, car_EoM, env, veh)
+        # 3: runs online POMDP planner
+        # - 3.a: updates belief from new observation, old observation, old belief
+        # update belief
+        # convert to DESPOT belief format
+
+        # - 3.b: runs DESPOT and returns action
+        # ...
+        a_k1, end_run = controller(o_k, a_k, Dt, U_HJB, A, obstacle_mat, car_EoM, env, veh)
 
         # stores state/action history
-        push!(s_hist, s_k)
+        push!(o_hist, o_k)
         push!(a_hist, a_k)
 
         # passes new action to next loop
+        o_kn1 = deepcopy(o_k)
         a_k = deepcopy(a_k1)
 
         if step >= 2*60*4
@@ -189,7 +208,7 @@ function new_main()
     # saving ---
     # TO-DO: add datetime to file name
     # TO-DO: add time stamp to each entry
-    @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/s_hist.bson" s_hist
+    @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/o_hist.bson" o_hist
     @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/a_hist.bson" a_hist
 
     rand_noise_generator_for_solver = MersenneTwister(rand_noise_generator_seed_for_solver)
@@ -220,5 +239,4 @@ function new_main()
 
     b = POMDP_2D_action_space_state_distribution(golfcart_2D_action_space_pomdp.world,current_belief)
     a, info = action_info(planner, b)
-
 end
