@@ -14,71 +14,6 @@ rostypegen()
 using .state_estimator_pkg.srv
 using .controller_pkg.srv
 
-# TO-DO: need to set "close to zero" commands to actually be zero (due to floating point errors) (think this causes grinding)
-
-function main()
-    init_node("controller")
-
-    # parameters ---
-    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/U_HJB.bson" U_HJB
-    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/env.bson" env
-    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/veh.bson" veh
-
-    Dt = 0.1
-    rate = Rate(1/Dt)
-
-    Am = [[a_v,a_phi] for a_v in [-veh.c_vb, veh.c_vf], a_phi in [-veh.c_phi, 0.0, veh.c_phi]]
-    A = reshape(Am, (length(Am),1))
-    sort!(A, dims=1)
-
-    # execution ---
-    end_run = false
-    a_k = [0.0, 0.0]
-    s_hist = []
-    a_hist = []
-
-    step = 1
-
-    # main loop
-    while end_run == false
-        # 1: publishes current action to ESC
-        ack_publisher_client(a_k)
-        println("\ncontroller: a_k: ", a_k)
-
-        # 2: receives current state from Vicon
-        s_k = state_estimator_client(true)
-        println("controller: s_k: ", s_k)
-
-        # 3: calculates next action
-        a_k1, end_run = controller(s_k, a_k, Dt, U_HJB, A, obstacle_mat, car_EoM, env, veh)
-
-        # stores state/action history
-        push!(s_hist, s_k)
-        push!(a_hist, a_k)
-
-        # passes new action to next loop
-        a_k = deepcopy(a_k1)
-
-        if step >= 2*60*4
-            end_run = true
-        end
-        step += 1
-
-        # 4: sleeps for remainder of Dt loop
-        sleep(rate)
-    end
-
-    # sends [0,0] action to stop vehicle, ending run
-    ack_publisher_client([0.0, 0.0])
-    state_estimator_client(false)
-
-    # saving ---
-    # TO-DO: add datetime to file name
-    # TO-DO: add time stamp to each entry
-    @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/s_hist.bson" s_hist
-    @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/a_hist.bson" a_hist
-end
-
 # TO-DO: modify this function to fit AR-DESPOT solver (main site of modifications)
 #   - most code in main.jl loop
 #   - action(planner, b) takes current belief and uses POMDP planner/solver to find best action
@@ -126,117 +61,143 @@ end
 main()
 
 
-function new_main()
+function main()
+
     init_node("controller")
-
-    # parameters ---
-    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/U_HJB.bson" U_HJB
-    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/env.bson" env
-    @load "/home/adcl/Documents/marmot-algs/HJB-planner/bson/veh.bson" veh
-
-    Dt = 0.1
-    rate = Rate(1/Dt)
-
-    Am = [[a_v,a_phi] for a_v in [-veh.c_vb, veh.c_vf], a_phi in [-veh.c_phi, 0.0, veh.c_phi]]
-    A = reshape(Am, (length(Am),1))
-    sort!(A, dims=1)
-
-    # initial tracking ---
-    o_kn1 = []
-    for _ in 1:5
-        o_k = state_estimator_client(true)
-
-        if isempty(o_kn1) == false
-            # update belief
-
-        end
-
-        o_kn1 = deepcopy(o_k)
-
-        sleep(rate)
-    end
-
-    # moving ---
+    rand_noise_generator_for_solver = MersenneTwister(rand_noise_generator_seed_for_solver)
+    env = generate_ASPEN_environment_no_obstacles(0, rand_noise_generator_for_env)
+    # env.humans = Array{human_state,1}()
+    env_right_now = deepcopy(env)
+    belief_update_time_step = 0.5
     end_run = false
-    o_kn1 = []
-    a_k = [0.0, 0.0]
     o_hist = []
     a_hist = []
+    num_steps_so_far = 1
+    MAX_NUM_STEPS = 2*60*4
+    planning_rate  = Rate(1/0.5)
+    golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97,0.5,-100.0,2.0,-100.0,0.0,1.0,1000.0,4.0,env_right_now)
+    discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
+    isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
+    actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
+    solver = DESPOTSolver(bounds=IndependentBounds(DefaultPolicyLB(FunctionPolicy(calculate_lower_bound_policy_pomdp_planning_2D_action_space),max_depth=100),
+                            calculate_upper_bound_value_pomdp_planning_2D_action_space, check_terminal=true),K=50,D=100,T_max=0.3, tree_in_info=true,
+                            rng = rand_noise_generator_for_solver)
+    planner = POMDPs.solve(solver, golfcart_2D_action_space_pomdp);
 
-    step = 1
+    initial_observation = state_estimator_client(true)
+    env_right_now.cart.x = initial_observation[1]
+    env_right_now.cart.y = initial_observation[2]
+    env_right_now.cart.theta = initial_observation[3]
 
-    # main loop
+    current_pedestrian_states = Array{human_state,1}()
+    pedestrian_id = 1.0
+    for i in 4:2:length(initial_observation)
+        pedestrian = human_state(initial_observation[i],initial_observation[i+1],1.0,env_right_now.goals[1],pedestrian_id)
+        pedestrian_id += 1
+        push!(current_pedestrian_states,pedestrian)
+    end
+
+    env_right_now.complete_cart_lidar_data = current_pedestrian_states
+    env_right_now.cart_lidar_data = current_pedestrian_states
+
+    initial_belief_over_complete_cart_lidar_data = update_belief([],env_right_now.goals,[],env_right_now.complete_cart_lidar_data)
+    initial_belief = get_belief_for_selected_humans_from_belief_over_complete_lidar_data(initial_belief_over_complete_cart_lidar_data,
+                                                        env_right_now.complete_cart_lidar_data, env_right_now.cart_lidar_data)
+
+    #First half second
+    sleep(belief_update_time_step)
+    new_observation = state_estimator_client(true)
+    new_pedestrian_states = Array{human_state,1}()
+    pedestrian_id = 1.0
+    for i in 4:2:length(initial_observation)
+        new_pedestrian = human_state(new_observation[i],new_observation[i+1],1.0,env_right_now.goals[1],pedestrian_id)
+        pedestrian_id += 1
+        push!(new_pedestrian_states,new_pedestrian)
+    end
+
+    env_right_now.complete_cart_lidar_data = new_pedestrian_states
+    env_right_now.cart_lidar_data = new_pedestrian_states
+    current_belief_over_complete_cart_lidar_data = update_belief(initial_belief_over_complete_cart_lidar_data, env_right_now.goals, current_pedestrian_states, new_pedestrian_states)
+    current_belief = get_belief_for_selected_humans_from_belief_over_complete_lidar_data(current_belief_over_complete_cart_lidar_data,
+                                                        env_right_now.complete_cart_lidar_data, env_right_now.cart_lidar_data)
+    current_pedestrian_states = new_pedestrian_states
+
+    #Second half second
+    sleep(belief_update_time_step)
+    new_observation = state_estimator_client(true)
+    new_pedestrian_states = Array{human_state,1}()
+    pedestrian_id = 1.0
+    for i in 4:2:length(initial_observation)
+        new_pedestrian = human_state(new_observation[i],new_observation[i+1],1.0,env_right_now.goals[1],pedestrian_id)
+        pedestrian_id += 1
+        push!(new_pedestrian_states,new_pedestrian)
+    end
+
+    env_right_now.complete_cart_lidar_data = new_pedestrian_states
+    env_right_now.cart_lidar_data = new_pedestrian_states
+    current_belief_over_complete_cart_lidar_data = update_belief(current_belief_over_complete_cart_lidar_data, env_right_now.goals,
+                                                            current_pedestrian_states, new_pedestrian_states)
+    current_belief = get_belief_for_selected_humans_from_belief_over_complete_lidar_data(current_belief_over_complete_cart_lidar_data,
+                                                        env_right_now.complete_cart_lidar_data, env_right_now.cart_lidar_data)
+    current_pedestrian_states = new_pedestrian_states
+
+    #Get the first action
+    b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)
+    a, info = action_info(planner, b)
+
+    #Let the while loop begin!
     while end_run == false
         # 1: publishes current action to ESC
-        ack_publisher_client(a_k)
-        println("\ncontroller: a_k: ", a_k)
+        ack_publisher_client(a)
+        println("\ncontroller: a_k: ", a)
 
-        # 2: receives current state from Vicon
-        o_k = state_estimator_client(true)
-        println("controller: o_k: ", o_k)
+        # 2: receives next observation from Vicon
+        new_observation = state_estimator_client(true)
+        println("controller: o_k: ", new_observation)
+        env_right_now.cart.x = new_observation[1]
+        env_right_now.cart.y = new_observation[2]
+        env_right_now.cart.theta = new_observation[3]
+        new_pedestrian_states = Array{human_state,1}()
+        pedestrian_id = 1.0
+        for i in 4:2:length(initial_observation)
+            new_pedestrian = human_state(new_observation[i],new_observation[i+1],1.0,env_right_now.goals[1],pedestrian_id)
+            pedestrian_id += 1
+            push!(new_pedestrian_states,new_pedestrian)
+        end
 
-        # 3: runs online POMDP planner
-        # - 3.a: updates belief from new observation, old observation, old belief
-        # update belief
-        # convert to DESPOT belief format
-
-        # - 3.b: runs DESPOT and returns action
-        # ...
-        a_k1, end_run = controller(o_k, a_k, Dt, U_HJB, A, obstacle_mat, car_EoM, env, veh)
+        #Update environment and the belief
+        env_right_now.complete_cart_lidar_data = new_pedestrian_states
+        env_right_now.cart_lidar_data = new_pedestrian_states
+        current_belief_over_complete_cart_lidar_data = update_belief(current_belief_over_complete_cart_lidar_data, env_right_now.goals,
+                                                                current_pedestrian_states, new_pedestrian_states)
+        current_belief = get_belief_for_selected_humans_from_belief_over_complete_lidar_data(current_belief_over_complete_cart_lidar_data,
+                                                            env_right_now.complete_cart_lidar_data, env_right_now.cart_lidar_data)
+        current_pedestrian_states = new_pedestrian_states
 
         # stores state/action history
-        push!(o_hist, o_k)
-        push!(a_hist, a_k)
+        push!(o_hist, new_observation)
+        push!(a_hist, a)
 
-        # passes new action to next loop
-        o_kn1 = deepcopy(o_k)
-        a_k = deepcopy(a_k1)
-
-        if step >= 2*60*4
+        dist_to_goal = sqrt( (env_right_now.cart.x - 2.75)^2 + (env_right_now.cart.y-10.5)^2 )
+        if (num_steps_so_far >= MAX_NUM_STEPS) || (dist_to_goal<=0.5))
             end_run = true
         end
-        step += 1
+        num_steps_so_far += 1
+
+        #Obtain the action for next cycle
+        b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)
+        a, info = action_info(planner, b)
 
         # 4: sleeps for remainder of Dt loop
-        sleep(rate)
+        sleep(planning_rate)
     end
 
     # sends [0,0] action to stop vehicle, ending run
     ack_publisher_client([0.0, 0.0])
     state_estimator_client(false)
-
-    # saving ---
-    # TO-DO: add datetime to file name
-    # TO-DO: add time stamp to each entry
     @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/o_hist.bson" o_hist
     @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/a_hist.bson" a_hist
 
-    rand_noise_generator_for_solver = MersenneTwister(rand_noise_generator_seed_for_solver)
-    env = generate_ASPEN_environment_no_obstacles(10, rand_noise_generator_for_env)
-    env.humans = Array{human_state,1}()
-
     #TO DO:
     #Include appropriate header files
-    #Update vehicle position from
-    #Update Cart Lidar Data from Vicon data
-    env_right_now = deepcopy(env)
-
-    #Create POMDP for env_right_now
-    #POMDP_Planner_2D_action_space <: POMDPs.POMDP{POMDP_state_2D_action_space,Int,Array{location,1}}
-    # discount_factor::Float64; pedestrian_distance_threshold::Float64; pedestrian_collision_penalty::Float64;
-    # obstacle_distance_threshold::Float64; obstacle_collision_penalty::Float64; goal_reward_distance_threshold::Float64;
-    # cart_goal_reached_distance_threshold::Float64; goal_reward::Float64; max_cart_speed::Float64; world::experiment_environment
-    golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97,0.5,-100.0,2.0,-100.0,0.0,1.0,1000.0,4.0,env_right_now)
-    discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
-    isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
-    actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
-
-    solver = DESPOTSolver(bounds=IndependentBounds(DefaultPolicyLB(FunctionPolicy(calculate_lower_bound_policy_pomdp_planning_2D_action_space),max_depth=100),
-                            calculate_upper_bound_value_pomdp_planning_2D_action_space, check_terminal=true),K=50,D=100,T_max=0.5, tree_in_info=true,
-                            rng = rand_noise_generator_for_solver)
-
-    planner = POMDPs.solve(solver, golfcart_2D_action_space_pomdp);
-
-    b = POMDP_2D_action_space_state_distribution(golfcart_2D_action_space_pomdp.world,current_belief)
-    a, info = action_info(planner, b)
 end
