@@ -4,8 +4,15 @@ using RobotOS
 using BSON: @load, @save
 using Dates
 
-include("/home/adcl/Documents/marmot-algs/HJB-planner/HJB_generator_functions.jl")
-include("/home/adcl/Documents/marmot-algs/HJB-planner/HJB_planner_functions.jl")
+algs_path = "/home/adcl/Documents/marmot-algs/"
+include(algs_path * "HJB-planner/HJB_generator_functions.jl")
+include(algs_path * "HJB-planner/HJB_planner_functions.jl")
+
+han_path = "/home/adcl/Documents/human_aware_navigation/src/"
+include(han_path * "environment.jl")
+include(han_path * "utils.jl")
+include(han_path * "two_d_action_space_pomdp.jl")
+include(han_path * "belief_tracker.jl")
 
 @rosimport state_estimator_pkg.srv: EstState
 @rosimport controller_pkg.srv: AckPub
@@ -58,9 +65,6 @@ function ack_publisher_client(a)
     resp = ack_pub_srv(a_req)
 end
 
-main()
-
-
 function main()
 
     init_node("controller")
@@ -74,7 +78,8 @@ function main()
     a_hist = []
     num_steps_so_far = 1
     MAX_NUM_STEPS = 2*60*4
-    planning_rate  = Rate(1/0.5)
+    planning_Dt = 0.5
+    planning_rate  = Rate(1/planning_Dt)
     golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97,0.5,-100.0,2.0,-100.0,0.0,1.0,1000.0,4.0,env_right_now)
     discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
     isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
@@ -165,7 +170,7 @@ function main()
             push!(new_pedestrian_states,new_pedestrian)
         end
 
-        #Update environment and the belief
+        # 3: update environment and the belief
         env_right_now.complete_cart_lidar_data = new_pedestrian_states
         env_right_now.cart_lidar_data = new_pedestrian_states
         current_belief_over_complete_cart_lidar_data = update_belief(current_belief_over_complete_cart_lidar_data, env_right_now.goals,
@@ -184,11 +189,11 @@ function main()
         end
         num_steps_so_far += 1
 
-        #Obtain the action for next cycle
+        # 4: obtain the action for next cycle
         b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)
         a, info = action_info(planner, b)
 
-        # 4: sleeps for remainder of Dt loop
+        # 5: sleeps for remainder of Dt loop
         sleep(planning_rate)
     end
 
@@ -201,3 +206,5 @@ function main()
     #TO DO:
     #Include appropriate header files
 end
+
+main()
