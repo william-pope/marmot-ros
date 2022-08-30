@@ -13,6 +13,7 @@ include(han_path * "environment.jl")
 include(han_path * "utils.jl")
 include(han_path * "two_d_action_space_pomdp.jl")
 include(han_path * "belief_tracker.jl")
+include(han_path * "new_main_2d_action_space_pomdp.jl")
 
 @rosimport state_estimator_pkg.srv: EstState
 @rosimport controller_pkg.srv: AckPub
@@ -20,6 +21,10 @@ include(han_path * "belief_tracker.jl")
 rostypegen()
 using .state_estimator_pkg.srv
 using .controller_pkg.srv
+
+discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
+isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
+actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
 
 # TO-DO: modify this function to fit AR-DESPOT solver (main site of modifications)
 #   - most code in main.jl loop
@@ -66,10 +71,10 @@ function ack_publisher_client(a)
 end
 
 function main()
-
     init_node("controller")
-    rand_noise_generator_for_solver = MersenneTwister(rand_noise_generator_seed_for_solver)
-    env = generate_ASPEN_environment_no_obstacles(0, rand_noise_generator_for_env)
+
+    rand_noise_generator_for_solver = MersenneTwister(100)
+    env = generate_ASPEN_environment_no_obstacles(0, rand_noise_generator_for_solver)
     # env.humans = Array{human_state,1}()
     env_right_now = deepcopy(env)
     belief_update_time_step = 0.5
@@ -149,10 +154,12 @@ function main()
     #Get the first action
     b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)
     a, info = action_info(planner, b)
+    a = [a[2],a[1]]
 
     #Let the while loop begin!
     while end_run == false
         # 1: publishes current action to ESC
+        a[1] = 0.5*a[1]  # NOTE: change back
         ack_publisher_client(a)
         println("\ncontroller: a_k: ", a)
 
@@ -184,7 +191,7 @@ function main()
         push!(a_hist, a)
 
         dist_to_goal = sqrt( (env_right_now.cart.x - 2.75)^2 + (env_right_now.cart.y-10.5)^2 )
-        if (num_steps_so_far >= MAX_NUM_STEPS) || (dist_to_goal<=0.5))
+        if ((num_steps_so_far >= MAX_NUM_STEPS) || (dist_to_goal<=0.5))
             end_run = true
         end
         num_steps_so_far += 1
@@ -192,7 +199,7 @@ function main()
         # 4: obtain the action for next cycle
         b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)
         a, info = action_info(planner, b)
-
+        a = [a[2],a[1]]
         # 5: sleeps for remainder of Dt loop
         sleep(planning_rate)
     end
