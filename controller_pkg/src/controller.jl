@@ -78,14 +78,13 @@ function main()
     # env.humans = Array{human_state,1}()
     env_right_now = deepcopy(env)
     belief_update_time_step = 0.5
-    end_run = false
-    o_hist = []
+    end_run = false    o_hist = []
     a_hist = []
     num_steps_so_far = 1
     MAX_NUM_STEPS = 2*60*4
     planning_Dt = 0.5
     planning_rate  = Rate(1/planning_Dt)
-    golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97,0.5,-100.0,2.0,-100.0,0.0,1.0,1000.0,4.0,env_right_now)
+    golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97,0.5,-100.0,2.0,-100.0,0.0,1.0,1000.0,2.0,env_right_now)
     discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
     isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
     actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
@@ -153,13 +152,13 @@ function main()
 
     #Get the first action
     b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)
-    a, info = action_info(planner, b)
-    a = [a[2],a[1]]
+    action, info = action_info(planner, b)
+    a = [action[2],action[1]]
 
     #Let the while loop begin!
     while end_run == false
         # 1: publishes current action to ESC
-        a[1] = 0.5*a[1]  # NOTE: change back
+        # a[1] = 0.5*a[1]  # NOTE: change back
         ack_publisher_client(a)
         println("\ncontroller: a_k: ", a)
 
@@ -190,7 +189,7 @@ function main()
         push!(o_hist, new_observation)
         push!(a_hist, a)
 
-        dist_to_goal = sqrt( (env_right_now.cart.x - 2.75)^2 + (env_right_now.cart.y-10.5)^2 )
+        dist_to_goal = sqrt( (env_right_now.cart.x - env_right_now.cart.goal.x)^2 + (env_right_now.cart.y-env_right_now.cart.goal.y)^2 )
         if ((num_steps_so_far >= MAX_NUM_STEPS) || (dist_to_goal<=0.5))
             end_run = true
         end
@@ -198,8 +197,8 @@ function main()
 
         # 4: obtain the action for next cycle
         b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)
-        a, info = action_info(planner, b)
-        a = [a[2],a[1]]
+        action, info = action_info(planner, b)
+        a = [action[2],action[1]]
         # 5: sleeps for remainder of Dt loop
         sleep(planning_rate)
     end
@@ -210,8 +209,14 @@ function main()
     @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/o_hist.bson" o_hist
     @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/a_hist.bson" a_hist
 
-    #TO DO:
-    #Include appropriate header files
 end
 
-main()
+
+
+#=
+Changes:
+1) Delta Theta Angle to Steering Angle
+2) Delta velocity to actual velocity
+3) Change [0.0,0.0] to sudden break action
+4) Include sudden brak action
+=#
