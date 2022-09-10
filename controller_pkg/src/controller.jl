@@ -70,6 +70,30 @@ function ack_publisher_client(a)
     resp = ack_pub_srv(a_req)
 end
 
+
+#=
+POMDP action set: Delta_v = {+1.0, +0.0, -1.0} m/s, Delta_theta = {+45, +30, +15, +0, -15, -30, -45} deg
+ROS action set: v = [-0.75, 1.5] m/s, phi = [-0.475, 0.475] rad
+Dt = 0.5 sec
+v_kn1 = ... m/s
+=#
+function pomdp2ros_action(action, v_kn1, Dt, veh_L)
+    # velocity
+    Dv = action[2]
+    v_k = clamp(v_kn1 + Dv, 0.0, 1.0)
+    arc_length = v_k*Dt
+    # steering Angle
+    # max_sa = 0.06353163608639502
+    max_sa = 0.475
+    if(arc_length!=0)
+        steer_angle = clamp(atan(veh_L*action[1]/arc_length), -max_sa, max_sa)
+    else
+        steer_angle = 0.0
+    end
+    return [v_k,steer_angle]
+end
+
+
 function main()
     init_node("controller")
 
@@ -78,13 +102,14 @@ function main()
     # env.humans = Array{human_state,1}()
     env_right_now = deepcopy(env)
     belief_update_time_step = 0.5
-    end_run = false    o_hist = []
+    end_run = false    
+    o_hist = []
     a_hist = []
     num_steps_so_far = 1
     MAX_NUM_STEPS = 2*60*4
     planning_Dt = 0.5
     planning_rate  = Rate(1/planning_Dt)
-    golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97,0.5,-100.0,2.0,-100.0,0.0,1.0,1000.0,2.0,env_right_now)
+    golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97,0.01,-100.0,2.0,-100.0,0.0,1.0,1000.0,2.0,env_right_now)
     discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
     isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
     actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
@@ -153,7 +178,8 @@ function main()
     #Get the first action
     b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)
     action, info = action_info(planner, b)
-    a = [action[2],action[1]]
+    a = pomdp2ros_action(action, env_right_now.cart.v, planning_Dt, env_right_now.cart.L)
+
 
     #Let the while loop begin!
     while end_run == false
@@ -168,6 +194,7 @@ function main()
         env_right_now.cart.x = new_observation[1]
         env_right_now.cart.y = new_observation[2]
         env_right_now.cart.theta = new_observation[3]
+        env_right_now.cart.v = a[1]
         new_pedestrian_states = Array{human_state,1}()
         pedestrian_id = 1.0
         for i in 4:2:length(initial_observation)
@@ -198,7 +225,8 @@ function main()
         # 4: obtain the action for next cycle
         b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)
         action, info = action_info(planner, b)
-        a = [action[2],action[1]]
+        a = pomdp2ros_action(action, env_right_now.cart.v, planning_Dt, env_right_now.cart.L)
+        # a = [action[2],action[1]]
         # 5: sleeps for remainder of Dt loop
         sleep(planning_rate)
     end
@@ -211,12 +239,12 @@ function main()
 
 end
 
-
+main()
 
 #=
 Changes:
 1) Delta Theta Angle to Steering Angle
 2) Delta velocity to actual velocity
-3) Change [0.0,0.0] to sudden break action
-4) Include sudden brak action
+3) Change [0.0,0.0] to sudden brake action
+4) Include sudden brake action
 =#
