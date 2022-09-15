@@ -114,7 +114,7 @@ function main()
     isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
     actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
     solver = DESPOTSolver(bounds=IndependentBounds(DefaultPolicyLB(FunctionPolicy(calculate_lower_bound_policy_pomdp_planning_2D_action_space),max_depth=100),
-                            calculate_upper_bound_value_pomdp_planning_2D_action_space, check_terminal=true),K=50,D=100,T_max=0.3, tree_in_info=true,
+                            calculate_upper_bound_value_pomdp_planning_2D_action_space, check_terminal=true),K=50,D=100,T_max=0.2, tree_in_info=true,
                             rng = rand_noise_generator_for_solver)
     planner = POMDPs.solve(solver, golfcart_2D_action_space_pomdp);
 
@@ -179,14 +179,17 @@ function main()
     b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)
     action, info = action_info(planner, b)
     a = pomdp2ros_action(action, env_right_now.cart.v, planning_Dt, env_right_now.cart.L)
-
-
+    println("HG**********")
+    println(Dates.now())
+    println("**************")
     #Let the while loop begin!
     while end_run == false
+        println("**************")
+
         # 1: publishes current action to ESC
-        # a[1] = 0.5*a[1]  # NOTE: change back
         ack_publisher_client(a)
         println("\ncontroller: a_k: ", a)
+        println(Dates.now())
 
         # 2: receives next observation from Vicon
         new_observation = state_estimator_client(true)
@@ -202,6 +205,7 @@ function main()
             pedestrian_id += 1
             push!(new_pedestrian_states,new_pedestrian)
         end
+        println(Dates.now())
 
         # 3: update environment and the belief
         env_right_now.complete_cart_lidar_data = new_pedestrian_states
@@ -221,14 +225,28 @@ function main()
             end_run = true
         end
         num_steps_so_far += 1
+        println(Dates.now())
 
         # 4: obtain the action for next cycle
-        b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)
+        initial_state = [env_right_now.cart.x,env_right_now.cart.y,env_right_now.cart.theta]
+        extra_parameters = [env_right_now.cart.v, env_right_now.cart.L, a[2]]
+        x,y,theta = get_intermediate_points(initial_state, 0.5, extra_parameters);
+        env_next_step = deepcopy(env_right_now)
+        env_next_step.cart.x, env_next_step.cart.y, env_next_step.cart.theta = last(x), last(y), last(theta)
+
+        b = POMDP_2D_action_space_state_distribution(env_next_step,current_belief)
         action, info = action_info(planner, b)
-        a = pomdp2ros_action(action, env_right_now.cart.v, planning_Dt, env_right_now.cart.L)
+        println("POMDP action: ", action)
+        a = pomdp2ros_action(action, env_next_step.cart.v, planning_Dt, env_next_step.cart.L)
+        println("vehicle state at next step: ", [env_next_step.cart.x, env_next_step.cart.y, env_next_step.cart.theta])
+        println("action at next step: ", a)
         # a = [action[2],action[1]]
+        println(Dates.now())
+
         # 5: sleeps for remainder of Dt loop
         sleep(planning_rate)
+        println(Dates.now())
+
     end
 
     # sends [0,0] action to stop vehicle, ending run
