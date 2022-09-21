@@ -95,12 +95,16 @@ end
 
 
 function main()
+    # initialize ROS controller node
     init_node("controller")
 
+    # define environment
     rand_noise_generator_for_solver = MersenneTwister(100)
     env = generate_ASPEN_environment_no_obstacles(0, rand_noise_generator_for_solver)
     # env.humans = Array{human_state,1}()
     env_right_now = deepcopy(env)
+
+    # initialize utilities
     belief_update_time_step = 0.5
     end_run = false    
     o_hist = []
@@ -109,6 +113,8 @@ function main()
     MAX_NUM_STEPS = 2*60*4
     planning_Dt = 0.5
     planning_rate  = Rate(1/planning_Dt)
+
+    # define POMDP
     golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97,0.01,-100.0,2.0,-100.0,0.0,1.0,1000.0,2.0,env_right_now)
     discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
     isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
@@ -118,6 +124,7 @@ function main()
                             rng = rand_noise_generator_for_solver)
     planner = POMDPs.solve(solver, golfcart_2D_action_space_pomdp);
 
+    # receive initial observation from Vicon, convert to POMDP objects
     initial_observation = state_estimator_client(true)
     env_right_now.cart.x = initial_observation[1]
     env_right_now.cart.y = initial_observation[2]
@@ -126,19 +133,22 @@ function main()
     current_pedestrian_states = Array{human_state,1}()
     pedestrian_id = 1.0
     for i in 4:2:length(initial_observation)
-        pedestrian = human_state(initial_observation[i],initial_observation[i+1],1.0,env_right_now.goals[1],pedestrian_id)
+        pedestrian = human_state(initial_observation[i], initial_observation[i+1], 1.0, env_right_now.goals[1], pedestrian_id)
         pedestrian_id += 1
-        push!(current_pedestrian_states,pedestrian)
+        push!(current_pedestrian_states, pedestrian)
     end
 
     env_right_now.complete_cart_lidar_data = current_pedestrian_states
     env_right_now.cart_lidar_data = current_pedestrian_states
 
-    initial_belief_over_complete_cart_lidar_data = update_belief([],env_right_now.goals,[],env_right_now.complete_cart_lidar_data)
+    # calculate initial belief based on observation
+    initial_belief_over_complete_cart_lidar_data = update_belief([], env_right_now.goals, [], env_right_now.complete_cart_lidar_data)
     initial_belief = get_belief_for_selected_humans_from_belief_over_complete_lidar_data(initial_belief_over_complete_cart_lidar_data,
                                                         env_right_now.complete_cart_lidar_data, env_right_now.cart_lidar_data)
 
-    #First half second
+    # (?): Does vehicle need to pause at the beginning? Can't it just start moving using a uniform belief?
+
+    # t=0.0 -> t=0.5 sec
     sleep(belief_update_time_step)
     new_observation = state_estimator_client(true)
     new_pedestrian_states = Array{human_state,1}()
@@ -156,7 +166,7 @@ function main()
                                                         env_right_now.complete_cart_lidar_data, env_right_now.cart_lidar_data)
     current_pedestrian_states = new_pedestrian_states
 
-    #Second half second
+    # t=0.5 -> t=1.0 sec
     sleep(belief_update_time_step)
     new_observation = state_estimator_client(true)
     new_pedestrian_states = Array{human_state,1}()
@@ -207,6 +217,17 @@ function main()
         end
         println(Dates.now())
 
+        # TO-DO: finish this function
+        #   - (?): issue with passing large env_right_now struct?
+        function ros2pomdp_observation(ros_observation, env_right_now)
+            env_right_now.cart.x = new_observation[1]
+            env_right_now.cart.y = new_observation[2]
+            env_right_now.cart.theta = new_observation[3]
+            env_right_now.cart.v = a[1]
+
+            return 
+        end
+
         # 3: update environment and the belief
         env_right_now.complete_cart_lidar_data = new_pedestrian_states
         env_right_now.cart_lidar_data = new_pedestrian_states
@@ -249,12 +270,13 @@ function main()
 
     end
 
-    # sends [0,0] action to stop vehicle, ending run
+    # sends [0,0] action to stop vehicle
     ack_publisher_client([0.0, 0.0])
     state_estimator_client(false)
+
+    # saves state and action history
     @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/o_hist.bson" o_hist
     @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/a_hist.bson" a_hist
-
 end
 
 main()

@@ -2,7 +2,7 @@
 
 import rospy
 from geometry_msgs.msg import PoseStamped
-from state_estimator_pkg.srv import EstState, EstStateResponse
+from state_updater_pkg.srv import UpdateState, UpdateStateResponse
 
 import copy
 import math
@@ -13,7 +13,7 @@ import csv
 # File Overview:
 # - subscribes to Pose topic for each object tracked by Vicon
 # - each subscriber has a callback function that stashes received pose in a global variable
-# - controller requests state vector periodically by querying the EstState service
+# - controller requests state vector periodically by querying the UpdateState service
 # - service returns the most recently collected poses from the Vicon topics
 
 # Vicon state vector:
@@ -26,7 +26,7 @@ import csv
 #   ...]
 # - length = 3 + 2*n_peds
 
-class StateEstimator:
+class StateUpdater:
     current_veh_msg = []
     current_ped1_msg = []
     # current_ped2_msg = []
@@ -76,10 +76,10 @@ class StateEstimator:
         #     self.store_pose_msg,
         #     queue_size=1)
 
-        self.est_state_srv = rospy.Service(
-            "/car/state_estimator/get_est_state",
-            EstState,
-            self.estimate_state)
+        self.update_state_srv = rospy.Service(
+            "/car/state_updater/get_state_update",
+            UpdateState,
+            self.update_state)
 
         return
 
@@ -109,7 +109,7 @@ class StateEstimator:
         return
 
     # function called by service
-    def estimate_state(self, req):
+    def update_state(self, req):
         self.record_hist = req.record
 
         if self.record_hist == False and self.saved_hist == False and len(self.hist_veh_msg) > 0: 
@@ -122,7 +122,7 @@ class StateEstimator:
         # current_state[7:9] = self.ped_state(self.current_ped3_msg)
         # current_state[9:11] = self.ped_state(self.current_ped4_msg)
 
-        return EstStateResponse(current_state)
+        return UpdateStateResponse(current_state)
 
     # converts ROS PoseStamped message to regular (x,y,theta) variables
     def veh_state(self, pose_msg):
@@ -189,8 +189,8 @@ class StateEstimator:
 
 if __name__ == '__main__':
     try:
-        rospy.init_node("state_estimator")
-        StateEstimator()
+        rospy.init_node("state_updater")
+        StateUpdater()
         rospy.spin()
     except rospy.ROSInterruptException:
         pass
