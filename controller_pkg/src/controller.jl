@@ -15,49 +15,22 @@ include(han_path * "two_d_action_space_pomdp.jl")
 include(han_path * "belief_tracker.jl")
 include(han_path * "new_main_2d_action_space_pomdp.jl")
 
-@rosimport state_estimator_pkg.srv: EstState
+@rosimport state_updater_pkg.srv: UpdateState
 @rosimport controller_pkg.srv: AckPub
 
 rostypegen()
-using .state_estimator_pkg.srv
+using .state_updater_pkg.srv
 using .controller_pkg.srv
 
 discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
 isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
 actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
 
-# TO-DO: modify this function to fit AR-DESPOT solver (main site of modifications)
-#   - most code in main.jl loop
-#   - action(planner, b) takes current belief and uses POMDP planner/solver to find best action
-#       - planner = POMDPs.solve(solver, pomdp)
-#       - solver = DESPOTSolver(..., ARDESPOT.IndependentBounds(lower, upper, ...), ...)
-#           - lower = ARDESPOT.DefaultPolicyLB(FunctionPolicy(calculate_lower_bound_policy_pomdp_planning)))
-#           - upper = calculate_upper_bound_policy_pomdp_planning
-function controller(s_k, a_k, Dt, U, A, O, EoM::Function, env::Environment, veh::Vehicle)
-    # propagates state to next time step given current action
-    # TO-DO: replace this with belief updater (?)
-    s_k1 = runge_kutta_4(s_k, a_k, Dt, EoM, veh)
+function state_updater_client(record)
+    wait_for_service("/car/state_updater/get_state_update")
+    update_state_srv = ServiceProxy{UpdateState}("/car/state_updater/get_state_update")
 
-    # runs tree search to find best action at next time step
-    if in_target_set(s_k1, env, veh) == false && in_workspace(s_k1, env, veh) == true
-        # TO-DO: replace this with POMDP function
-        a_k1 = HJB_action(s_k1, U, A, O, env, veh)
-        println("a_k1: ", a_k1)
-        end_run = false
-    else
-        a_k1 = [0.0, 0.0]
-        end_run = true
-    end
-    # println("controller: a_k1: ", a_k1)
-
-    return a_k1, end_run
-end
-
-function state_estimator_client(record)
-    wait_for_service("/car/state_estimator/get_est_state")
-    est_state_srv = ServiceProxy{EstState}("/car/state_estimator/get_est_state")
-
-    resp = est_state_srv(EstStateRequest(record))
+    resp = update_state_srv(UpdateStateRequest(record))
 
     return resp.state
 end
@@ -70,7 +43,6 @@ function ack_publisher_client(a)
     resp = ack_pub_srv(a_req)
 end
 
-
 #=
 POMDP action set: Delta_v = {+1.0, +0.0, -1.0} m/s, Delta_theta = {+45, +30, +15, +0, -15, -30, -45} deg
 ROS action set: v = [-0.75, 1.5] m/s, phi = [-0.475, 0.475] rad
@@ -82,14 +54,17 @@ function pomdp2ros_action(action, v_kn1, Dt, veh_L)
     Dv = action[2]
     v_k = clamp(v_kn1 + Dv, 0.0, 1.0)
     arc_length = v_k*Dt
-    # steering Angle
+
+    # steering angle
     # max_sa = 0.06353163608639502
-    max_sa = 0.475
+    #max_sa = 0.475
+    max_sa = Inf
     if(arc_length!=0)
         steer_angle = clamp(atan(veh_L*action[1]/arc_length), -max_sa, max_sa)
     else
         steer_angle = 0.0
     end
+
     return [v_k,steer_angle]
 end
 
@@ -115,17 +90,18 @@ function main()
     planning_rate  = Rate(1/planning_Dt)
 
     # define POMDP
-    golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97,0.01,-100.0,2.0,-100.0,0.0,1.0,1000.0,2.0,env_right_now)
+    # golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97,0.2,-100.0,2.0,-100.0,0.0,GLOBAL_RADIUS_AROUND_GOAL,100.0,2.0,GLOBAL_TIME_STEP,env_right_now)
+    golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97,0.1,-100.0,2.0,-100.0,0.0,1.0,100.0,2.0,0.5,env_right_now)
     discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
     isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
     actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
     solver = DESPOTSolver(bounds=IndependentBounds(DefaultPolicyLB(FunctionPolicy(calculate_lower_bound_policy_pomdp_planning_2D_action_space),max_depth=100),
-                            calculate_upper_bound_value_pomdp_planning_2D_action_space, check_terminal=true),K=50,D=100,T_max=0.2, tree_in_info=true,
+                            calculate_upper_bound_value_pomdp_planning_2D_action_space, check_terminal=true),K=50,D=100,T_max=0.3, tree_in_info=true,
                             rng = rand_noise_generator_for_solver)
     planner = POMDPs.solve(solver, golfcart_2D_action_space_pomdp);
 
     # receive initial observation from Vicon, convert to POMDP objects
-    initial_observation = state_estimator_client(true)
+    initial_observation = state_updater_client(true)
     env_right_now.cart.x = initial_observation[1]
     env_right_now.cart.y = initial_observation[2]
     env_right_now.cart.theta = initial_observation[3]
@@ -150,7 +126,7 @@ function main()
 
     # t=0.0 -> t=0.5 sec
     sleep(belief_update_time_step)
-    new_observation = state_estimator_client(true)
+    new_observation = state_updater_client(true)
     new_pedestrian_states = Array{human_state,1}()
     pedestrian_id = 1.0
     for i in 4:2:length(initial_observation)
@@ -168,7 +144,7 @@ function main()
 
     # t=0.5 -> t=1.0 sec
     sleep(belief_update_time_step)
-    new_observation = state_estimator_client(true)
+    new_observation = state_updater_client(true)
     new_pedestrian_states = Array{human_state,1}()
     pedestrian_id = 1.0
     for i in 4:2:length(initial_observation)
@@ -197,12 +173,13 @@ function main()
         println("**************")
 
         # 1: publishes current action to ESC
+        println(Dates.now())
         ack_publisher_client(a)
         println("\ncontroller: a_k: ", a)
-        println(Dates.now())
 
         # 2: receives next observation from Vicon
-        new_observation = state_estimator_client(true)
+        println(Dates.now())
+        new_observation = state_updater_client(true)
         println("controller: o_k: ", new_observation)
         env_right_now.cart.x = new_observation[1]
         env_right_now.cart.y = new_observation[2]
@@ -215,20 +192,20 @@ function main()
             pedestrian_id += 1
             push!(new_pedestrian_states,new_pedestrian)
         end
-        println(Dates.now())
 
-        # TO-DO: finish this function
-        #   - (?): issue with passing large env_right_now struct?
-        function ros2pomdp_observation(ros_observation, env_right_now)
-            env_right_now.cart.x = new_observation[1]
-            env_right_now.cart.y = new_observation[2]
-            env_right_now.cart.theta = new_observation[3]
-            env_right_now.cart.v = a[1]
+        # # TO-DO: finish this function
+        # #   - (?): issue with passing large env_right_now struct?
+        # function ros2pomdp_observation(ros_observation, env_right_now)
+        #     env_right_now.cart.x = new_observation[1]
+        #     env_right_now.cart.y = new_observation[2]
+        #     env_right_now.cart.theta = new_observation[3]
+        #     env_right_now.cart.v = a[1]
 
-            return 
-        end
+        #     return 
+        # end
 
         # 3: update environment and the belief
+        println(Dates.now())
         env_right_now.complete_cart_lidar_data = new_pedestrian_states
         env_right_now.cart_lidar_data = new_pedestrian_states
         current_belief_over_complete_cart_lidar_data = update_belief(current_belief_over_complete_cart_lidar_data, env_right_now.goals,
@@ -238,6 +215,7 @@ function main()
         current_pedestrian_states = new_pedestrian_states
 
         # stores state/action history
+        println(Dates.now())
         push!(o_hist, new_observation)
         push!(a_hist, a)
 
@@ -246,9 +224,9 @@ function main()
             end_run = true
         end
         num_steps_so_far += 1
-        println(Dates.now())
 
         # 4: obtain the action for next cycle
+        println(Dates.now())
         initial_state = [env_right_now.cart.x,env_right_now.cart.y,env_right_now.cart.theta]
         extra_parameters = [env_right_now.cart.v, env_right_now.cart.L, a[2]]
         x,y,theta = get_intermediate_points(initial_state, 0.5, extra_parameters);
@@ -257,22 +235,19 @@ function main()
 
         b = POMDP_2D_action_space_state_distribution(env_next_step,current_belief)
         action, info = action_info(planner, b)
-        println("POMDP action: ", action)
+        println("POMDP action @ t_k1: ", action)
         a = pomdp2ros_action(action, env_next_step.cart.v, planning_Dt, env_next_step.cart.L)
-        println("vehicle state at next step: ", [env_next_step.cart.x, env_next_step.cart.y, env_next_step.cart.theta])
-        println("action at next step: ", a)
-        # a = [action[2],action[1]]
-        println(Dates.now())
-
+        println("vehicle state @ t_k1: ", [env_next_step.cart.x, env_next_step.cart.y, env_next_step.cart.theta])
+        println("ROS action @ t_k1: ", a)
+        
         # 5: sleeps for remainder of Dt loop
-        sleep(planning_rate)
         println(Dates.now())
-
+        sleep(planning_rate)
     end
 
     # sends [0,0] action to stop vehicle
     ack_publisher_client([0.0, 0.0])
-    state_estimator_client(false)
+    state_updater_client(false)
 
     # saves state and action history
     @save "/home/adcl/catkin_ws/src/marmot-ros/controller_pkg/histories/o_hist.bson" o_hist

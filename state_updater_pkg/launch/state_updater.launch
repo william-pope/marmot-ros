@@ -1,6 +1,6 @@
 <!-- -*- mode: XML -*- -->
 <launch>
 
-  <node pkg="state_estimator_pkg" type="state_estimator.py" name="state_estimator" output="screen" />
+  <node pkg="state_updater_pkg" type="state_updater.py" name="state_updater" output="screen" />
 
 </launch>

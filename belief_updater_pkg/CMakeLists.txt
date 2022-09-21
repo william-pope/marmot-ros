@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(belief_estimator_pkg)
+project(belief_updater_pkg)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -57,7 +57,7 @@ find_package(catkin REQUIRED COMPONENTS
 # Generate services in the 'srv' folder
 add_service_files(
   FILES
-  EstState.srv
+  UpdateBelief.srv
 )
 
 ## Generate actions in the 'action' folder
@@ -170,7 +170,7 @@ include_directories(
 #   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
 
-catkin_install_python(PROGRAMS src/belief_updater.py
+install(FILES src/belief_updater.jl
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
