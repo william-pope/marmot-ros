@@ -15,6 +15,10 @@ include(han_path * "two_d_action_space_pomdp.jl")
 include(han_path * "belief_tracker.jl")
 include(han_path * "new_main_2d_action_space_pomdp.jl")
 
+# ROS connections:
+#   - to state_updater node as CLIENT to state_updater service
+#   - to ack_publisher node as CLIENT of ack_publisher service
+
 @rosimport state_updater_pkg.srv: UpdateState
 @rosimport controller_pkg.srv: AckPub
 
@@ -26,6 +30,7 @@ discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
 isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
 actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
 
+# call state_updater service as client
 function state_updater_client(record)
     wait_for_service("/car/state_updater/get_state_update")
     update_state_srv = ServiceProxy{UpdateState}("/car/state_updater/get_state_update")
@@ -35,6 +40,7 @@ function state_updater_client(record)
     return resp.state
 end
 
+# call ack_publisher service as client
 function ack_publisher_client(a)
     wait_for_service("/car/controller/act_ack_pub")
     ack_pub_srv = ServiceProxy{AckPub}("/car/controller/act_ack_pub")
@@ -160,6 +166,10 @@ function main()
     current_belief = get_belief_for_selected_humans_from_belief_over_complete_lidar_data(current_belief_over_complete_cart_lidar_data,
                                                         env_right_now.complete_cart_lidar_data, env_right_now.cart_lidar_data)
     current_pedestrian_states = new_pedestrian_states
+
+    # NOTE: planner still needs info on pedestrian positions for collision checking, etc.
+    #   - so probably still need to query state_updater once per loop for that info
+    #   - belief_updater service should only return the probability distribution for the current belief
 
     #Get the first action
     b = POMDP_2D_action_space_state_distribution(env_right_now,current_belief)

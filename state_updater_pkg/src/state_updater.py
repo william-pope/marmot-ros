@@ -76,6 +76,7 @@ class StateUpdater:
         #     self.store_pose_msg,
         #     queue_size=1)
 
+        # establish state_updater service as provider
         self.update_state_srv = rospy.Service(
             "/car/state_updater/get_state_update",
             UpdateState,

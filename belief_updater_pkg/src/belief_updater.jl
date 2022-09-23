@@ -11,21 +11,24 @@ include(han_path * "new_main_2d_action_space_pomdp.jl")
 
 # File Overview:
 # - requests state from state_updater, uses to update and store current belief internally (10 Hz)
+#   - occurs on its own using a main() function
 # - returns belief to controller when requested (2 Hz)
 
-# - should have a main() script to run belief updates as master
-# - should have global variables to store most recent distribution
-# - need to set up new service for get_belief_update
-# - need to attach to existing get_state_update service
+# ROS connections:
+#   - to state_updater node as CLIENT to state_updater service
+#   - to controller node as PROVIDER of belief_updater service
 
-@rosimport belief_estimator_pkg.srv: UpdateBelief
 @rosimport state_updater_pkg.srv: UpdateState
+@rosimport belief_estimator_pkg.srv: UpdateBelief
 
 rostypegen()
-using .belief_updater_pkg.srv
 using .state_updater_pkg.srv
+using .belief_updater_pkg.srv
 
-# set up request to state_updater service
+# initialize current belief as a global
+belief_k = []
+
+# call state_updater service as client
 function state_updater_client(record)
     wait_for_service("/car/state_updater/get_state_update")
     update_state_srv = ServiceProxy{UpdateState}("/car/state_updater/get_state_update")
@@ -35,29 +38,81 @@ function state_updater_client(record)
     return resp.state
 end
 
-        
+# function called by service
+function return_belief(req)
+    global belief_k
 
-        self.update_state_srv = rospy.Service(
-            "/car/state_updater/get_state_update",
-            UpdateState,
-            self.update_state)
+    # convert belief object to array for ROS message
+    belief_array = zeros(16)
+    i = 0
 
-        return
+    for human_prob in belief_k
+        for prob in human_prob.distribution
+            belief_array[i] = prob
+            i += 1
+        end
+    end
 
-    
+    return UpdateBeliefResponse(belief_array)
+end
 
-    # function called by service
-    def update_state(self, req):
-        self.record_hist = req.record
+# main function executed by the belief_updater node
+function main()
+    global belief_k
 
-        if self.record_hist == False and self.saved_hist == False and len(self.hist_veh_msg) > 0: 
-            self.save_s_hist()
+    # initializes ROS belief_updater node
+    init_node("belief_updater")
 
-        current_state = [0]*(3 + 2*(0))
-        current_state[0:3] = self.veh_state(self.current_veh_msg)
-        current_state[3:5] = self.ped_state(self.current_ped1_msg)
-        # current_state[5:7] = self.ped_state(self.current_ped2_msg)
-        # current_state[7:9] = self.ped_state(self.current_ped3_msg)
-        # current_state[9:11] = self.ped_state(self.current_ped4_msg)
+    # establish belief_updater service as provider
+    update_belief_srv = Service{UpdateBelief}(
+        "/car/belief_updater/get_belief_update",
+        return_belief)
 
-        return UpdateStateResponse(current_state)
+    # sets rate to pull observations and update belief
+    obs_Dt = 0.1
+    obs_rate = Rate(1/obs_Dt)
+
+    # main loop to repeatedly:
+    #   - (x) query Vicon observations
+    #   - (o) run belief update
+    #   - (x) store current belief in global for controller to request
+
+    # NOTE: don't want belief as a POMDP object, just want 1-d array of belief distributitions
+    #   - belief functions may output belief as a POMDP object, need to convert back
+
+    #   - need to figure out .goals
+    #       - need to define somewhere
+    #       - would prefer to get from controller.jl, but would be slightly more complex than hard coding
+
+    rand_noise_generator_for_solver = MersenneTwister(100)
+    env = generate_ASPEN_environment_no_obstacles(0, rand_noise_generator_for_solver)
+
+    belief_kn1_over_complete_cart_lidar_data = []
+    peds_kn1 = []
+
+    while true
+        # pull latest observation from state_updater
+        obs_k = state_updater_client(true)
+
+        # parse observation into pedestrian states
+        peds_k = Array{human_state,1}()
+        ped_id = 1.0
+        for i in 4:2:length(obs)
+            ped = human_state(obs_k[i], obs_k[i+1], 1.0, env.goals[1], ped_id)
+            ped_id += 1
+            push!(peds_k, ped)
+        end
+
+        # update belief based on observation
+        belief_k_over_complete_cart_lidar_data = update_belief(belief_kn1_over_complete_cart_lidar_data, env.goals, peds_kn1, peds_k)
+        belief_k = get_belief_for_selected_humans_from_belief_over_complete_lidar_data(belief_k_over_complete_cart_lidar_data, ped_states, ped_states)
+
+        # pass variables to next loop
+        peds_kn1 = peds_k
+        belief_kn1_over_complete_cart_lidar_data = belief_k_over_complete_cart_lidar_data
+
+        sleep(obs_rate) 
+    end
+end
+
+main()
