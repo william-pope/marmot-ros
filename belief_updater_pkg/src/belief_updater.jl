@@ -43,7 +43,7 @@ function return_belief(req)
     global belief_k
 
     # convert belief object to array for ROS message
-    belief_array = zeros(16)
+    belief_array = zeros(Float64, (16,1))
     i = 0
 
     for human_prob in belief_k
@@ -79,10 +79,6 @@ function main()
 
     # NOTE: don't want belief as a POMDP object, just want 1-d array of belief distributitions
     #   - belief functions may output belief as a POMDP object, need to convert back
-
-    #   - need to figure out .goals
-    #       - need to define somewhere
-    #       - would prefer to get from controller.jl, but would be slightly more complex than hard coding
 
     rand_noise_generator_for_solver = MersenneTwister(100)
     env = generate_ASPEN_environment_no_obstacles(0, rand_noise_generator_for_solver)

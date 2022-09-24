@@ -29,21 +29,21 @@ import csv
 class StateUpdater:
     current_veh_msg = []
     current_ped1_msg = []
-    # current_ped2_msg = []
-    # current_ped3_msg = []
-    # current_ped4_msg = []
+    current_ped2_msg = []
+    current_ped3_msg = []
+    current_ped4_msg = []
 
     record_hist = False
     saved_hist = False
 
     hist_veh_msg = []
     hist_ped1_msg = []
-    # hist_ped2_msg = []
-    # hist_ped3_msg = []
-    # hist_ped4_msg = []
+    hist_ped2_msg = []
+    hist_ped3_msg = []
+    hist_ped4_msg = []
 
     def __init__(self):
-        # TO-DO: change topic back to Marmot
+        # subscribe to Vicon topic for each object
         self.vrpn_sub_marmot_pose = rospy.Subscriber(
             "/car/vrpn_client_ros/vrpn_client_node/ADCL_Marmot/pose", 
             PoseStamped,
@@ -58,23 +58,26 @@ class StateUpdater:
             callback_args=1,
             queue_size=1)
 
-        # self.vrpn_sub_ped2_pose = rospy.Subscriber(
-        #     "/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped2/pose", 
-        #     PoseStamped,
-        #     self.store_pose_msg,
-        #     queue_size=1)
+        self.vrpn_sub_ped2_pose = rospy.Subscriber(
+            "/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped2/pose", 
+            PoseStamped,
+            callback=self.store_current_msg,
+            callback_args=2,
+            queue_size=1)
 
-        # self.vrpn_sub_ped3_pose = rospy.Subscriber(
-        #     "/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped3/pose", 
-        #     PoseStamped,
-        #     self.store_pose_msg,
-        #     queue_size=1)
+        self.vrpn_sub_ped3_pose = rospy.Subscriber(
+            "/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped3/pose", 
+            PoseStamped,
+            callback=self.store_current_msg,
+            callback_args=3,
+            queue_size=1)
 
-        # self.vrpn_sub_ped4_pose = rospy.Subscriber(
-        #     "/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped4/pose", 
-        #     PoseStamped,
-        #     self.store_pose_msg,
-        #     queue_size=1)
+        self.vrpn_sub_ped4_pose = rospy.Subscriber(
+            "/car/vrpn_client_ros/vrpn_client_node/ADCL_Ped4/pose", 
+            PoseStamped,
+            callback=self.store_current_msg,
+            callback_args=4,
+            queue_size=1)
 
         # establish state_updater service as provider
         self.update_state_srv = rospy.Service(
@@ -90,22 +93,26 @@ class StateUpdater:
             self.current_veh_msg = copy.deepcopy(pose_msg)
             if self.record_hist == True:
                 self.hist_veh_msg.append(pose_msg)
+
         elif vrpn_object == 1:
             self.current_ped1_msg = copy.deepcopy(pose_msg)
             if self.record_hist == True:
                 self.hist_ped1_msg.append(pose_msg)
-        # elif vrpn_object == 2:
-        #     self.current_ped2_msg = copy.deepcopy(pose_msg)
-        #     if record_hist == True:
-        #         hist_ped2_msg.append(pose_msg)
-        # elif vrpn_object == 3:
-        #     self.current_ped3_msg = copy.deepcopy(pose_msg)
-        #     if record_hist == True:
-        #         hist_ped3_msg.append(pose_msg)
-        # elif vrpn_object == 4:
-        #     self.current_ped4_msg = copy.deepcopy(pose_msg)
-        #     if record_hist == True:
-        #         hist_ped4_msg.append(pose_msg)
+
+        elif vrpn_object == 2:
+            self.current_ped2_msg = copy.deepcopy(pose_msg)
+            if self.record_hist == True:
+                self.hist_ped2_msg.append(pose_msg)
+
+        elif vrpn_object == 3:
+            self.current_ped3_msg = copy.deepcopy(pose_msg)
+            if self.record_hist == True:
+                self.hist_ped3_msg.append(pose_msg)
+                
+        elif vrpn_object == 4:
+            self.current_ped4_msg = copy.deepcopy(pose_msg)
+            if self.record_hist == True:
+                self.hist_ped4_msg.append(pose_msg)
         
         return
 
@@ -117,13 +124,16 @@ class StateUpdater:
             self.save_s_hist()
 
         current_state = [0]*(3 + 2*(0))
-        current_state[0:3] = self.veh_state(self.current_veh_msg)
-        current_state[3:5] = self.ped_state(self.current_ped1_msg)
-        # current_state[5:7] = self.ped_state(self.current_ped2_msg)
-        # current_state[7:9] = self.ped_state(self.current_ped3_msg)
-        # current_state[9:11] = self.ped_state(self.current_ped4_msg)
+        peds_in_env = [False]*4
 
-        return UpdateStateResponse(current_state)
+        current_state[0:3] = self.veh_state(self.current_veh_msg)
+
+        current_state[3:5], peds_in_env[0] = self.ped_state(self.current_ped1_msg)
+        current_state[5:7], peds_in_env[1] = self.ped_state(self.current_ped2_msg)
+        current_state[7:9], peds_in_env[2] = self.ped_state(self.current_ped3_msg)
+        current_state[9:11], peds_in_env[3] = self.ped_state(self.current_ped4_msg)
+
+        return UpdateStateResponse(current_state, peds_in_env)
 
     # converts ROS PoseStamped message to regular (x,y,theta) variables
     def veh_state(self, pose_msg):
@@ -136,17 +146,24 @@ class StateUpdater:
         x = pose_msg.pose.position.x + y_cal*math.cos(theta)
         y = pose_msg.pose.position.y + y_cal*math.sin(theta)
 
-        s = [x, y, theta]
+        state = [x, y, theta]
 
-        return s
+        return state
 
     def ped_state(self, pose_msg):
         x = pose_msg.pose.position.x
         y = pose_msg.pose.position.y
 
-        s = [x, y]
+        state = [x, y]
 
-        return s
+        # TO-DO: come up with conditon to check if Vicon reads ped within environment
+        #   - may read spare helmet outside workspace in storage area, or may return 0,0 or something if not visible at all
+        if True:
+            ped_in_env = True
+        else:
+            ped_in_env = False
+
+        return state, ped_in_env
 
     # saves full Vicon history to csv file, called once at end of execution
     # TO-DO: manage histories from all objects
