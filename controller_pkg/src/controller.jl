@@ -108,8 +108,8 @@ function main()
 
     while end_run == false
         println("\n--- --- ---")
-        println('k = ', plan_step)
-        println('t_k = ', Dates.now())
+        println("k = ", plan_step)
+        println("t_k = ", Dates.now())
 
         # 1: publish current action to ESC
         ack_publisher_client(a_ros)
@@ -140,14 +140,14 @@ function main()
             end_run = true
         end
         
-        # 4: calculate action for next cycle
+        # 4: calculate action for next cycle with POMDP solver
         state_k = [env_k.cart.x, env_k.cart.y, env_k.cart.theta]
         params_k = [env_k.cart.v, env_k.cart.L, a[2]]
 
         env_k1 = deepcopy(env_k)
         env_k1.cart.x, env_k1.cart.y, env_k1.cart.theta = last.(get_intermediate_points(state_k, planning_Dt, params_k));
 
-        b = POMDP_2D_action_space_state_distribution(env_k1, belief_k)        # (?): is this the right belief to use? (wrong time, wrong format)
+        b = POMDP_2D_action_space_state_distribution(env_k1, belief_k)        # creates struct
         a_pomdp, info = action_info(planner, b)                               # (?): what is "info"?
         a_ros = pomdp2ros_action(a_pomdp, env_k1.cart.v, planning_Dt, env_k1.cart.L)
         
