@@ -47,7 +47,7 @@ function return_belief(req)
     i = 0
 
     for human_prob in belief_k
-        for prob in human_prob.distribution
+        for prob in human_prob.pdf
             belief_array[i] = prob
             i += 1
         end
@@ -80,11 +80,11 @@ function main()
     # NOTE: don't want belief as a POMDP object, just want 1-d array of belief distributitions
     #   - belief functions may output belief as a POMDP object, need to convert back
 
-    rand_noise_generator_for_solver = MersenneTwister(100)
-    env = generate_ASPEN_environment_no_obstacles(0, rand_noise_generator_for_solver)
 
-    belief_kn1_over_complete_cart_lidar_data = []
-    peds_kn1 = []
+    env = generate_environment(5.518, 11.036, obstacle_location[])
+    list_human_goals = get_human_goals(env)
+    veh_sensor_data = vehicle_sensor(human_state[],Int64[],belief_over_human_goals[])
+
 
     while true
         # pull latest observation from state_updater
@@ -92,22 +92,27 @@ function main()
 
         # parse observation into pedestrian states
         peds_k = Array{human_state,1}()
-        ped_id = 1.0
+        peds_id = Array{Int64,1}()
+        ped_id = 1
         for i in 4:2:length(obs)
-            ped = human_state(obs_k[i], obs_k[i+1], 1.0, env.goals[1], ped_id)
-            ped_id += 1
+            ped = human_state(obs_k[i], obs_k[i+1], 1.0, env.goals[1])
             push!(peds_k, ped)
+            push!(peds_id, ped_id)
+            ped_id += 1
         end
 
         # update belief based on observation
-        belief_k_over_complete_cart_lidar_data = update_belief(belief_kn1_over_complete_cart_lidar_data, env.goals, peds_kn1, peds_k)
-        belief_k = get_belief_for_selected_humans_from_belief_over_complete_lidar_data(belief_k_over_complete_cart_lidar_data, ped_states, ped_states)
+        # belief_k_over_complete_cart_lidar_data = update_belief(belief_kn1_over_complete_cart_lidar_data, env.goals, peds_kn1, peds_k)
+        # belief_k = get_belief_for_selected_humans_from_belief_over_complete_lidar_data(belief_k_over_complete_cart_lidar_data, ped_states, ped_states)
+        belief_k = get_belief(veh_sensor_data, peds_k, peds_id, list_human_goals)
+        # get_belief(old_sensor_data, new_lidar_data, new_ids, human_goal_locations)
 
         # pass variables to next loop
-        peds_kn1 = peds_k
-        belief_kn1_over_complete_cart_lidar_data = belief_k_over_complete_cart_lidar_data
+        veh_sensor_data = vehicle_sensor(peds_k, peds_id, belief_k)
+        # peds_kn1 = peds_k
+        # belief_kn1_over_complete_cart_lidar_data = belief_k_over_complete_cart_lidar_data
 
-        sleep(obs_rate) 
+        sleep(obs_rate)
     end
 end
 

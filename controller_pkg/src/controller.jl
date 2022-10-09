@@ -9,27 +9,29 @@ include(algs_path * "HJB-planner/HJB_generator_functions.jl")
 include(algs_path * "HJB-planner/HJB_planner_functions.jl")
 
 han_path = "/home/adcl/Documents/human_aware_navigation/src/"
-include(han_path * "environment.jl")
-include(han_path * "utils.jl")
-include(han_path * "two_d_action_space_pomdp.jl")
-include(han_path * "belief_tracker.jl")
-include(han_path * "new_main_2d_action_space_pomdp.jl")
+include(han_path * "main.jl")
+# include(han_path * "utils.jl")
+# include(han_path * "two_d_action_space_pomdp.jl")
+# include(han_path * "belief_tracker.jl")
+# include(han_path * "new_main_2d_action_space_pomdp.jl")
 
 # ROS connections:
 #   - to state_updater node as CLIENT to state_updater service
 #   - to ack_publisher node as CLIENT of ack_publisher service
 
 @rosimport state_updater_pkg.srv: UpdateState
+@rosimport belief_updater_pkg.srv: UpdateBelief
 @rosimport controller_pkg.srv: AckPub
 
 rostypegen()
 using .state_updater_pkg.srv
+using .belief_updater_pkg.srv
 using .controller_pkg.srv
 
 # (?): these 3 lines are duplicated, can delete?
-discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
-isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
-actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
+# discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
+# isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
+# actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
 
 # call state_updater service as client
 function state_updater_client(record)
@@ -39,6 +41,26 @@ function state_updater_client(record)
     resp = update_state_srv(UpdateStateRequest(record))
 
     return resp.state
+end
+
+# call state_updater service as client
+function belief_updater_client()
+    wait_for_service("/car/belief_updater/get_belief_update")
+    update_belief_srv = ServiceProxy{UpdateBelief}("/car/belief_updater/get_belief_update")
+
+    resp = update_belief_srv(UpdateBeliefRequest(true))
+
+    return resp.belief_array
+end
+
+function ros2pomdp_belief(belief_ros)
+    l = length(belief_ros)
+    belief = Array{belief_over_human_goals,1}()
+    for i in 1:4:l
+        b = belief_over_human_goals(belief_ros[i:i+3])
+        push!(belief,b)
+    end
+    return belief
 end
 
 # call ack_publisher service as client
@@ -55,12 +77,12 @@ function pomdp2ros_action(a_pomdp, v_kn1, Dt, veh_L)
     v_min = 0.0
     v_max = 1.0
     phi_max = 0.475
-    
+
     # calculate velocity
     Dv = a_pomdp[2]
     v_k = v_kn1 + Dv
     clamp!(v_k, v_min, v_max)
-    
+
     # calculate steering angle
     arc_length = v_k*Dt
     if(arc_length != 0)
@@ -77,34 +99,41 @@ function main()
     # initialize ROS controller node
     init_node("controller")
 
-    # define environment
-    rand_noise_generator_for_solver = MersenneTwister(100)
-    env_k = generate_ASPEN_environment_no_obstacles(0, rand_noise_generator_for_solver)
-    # env.humans = Array{human_state,1}()
-
-    # define POMDP
-    golfcart_2D_action_space_pomdp = POMDP_Planner_2D_action_space(0.97, 0.1, -100.0, 2.0, -100.0, 0.0, 1.0, 100.0, 2.0, 0.5, env_k)
-
-    discount(p::POMDP_Planner_2D_action_space) = p.discount_factor
-    isterminal(::POMDP_Planner_2D_action_space, s::POMDP_state_2D_action_space) = is_terminal_state_pomdp_planning(s,location(-100.0,-100.0));
-    actions(m::POMDP_Planner_2D_action_space,b) = get_actions_non_holonomic(b)
-
-    solver = DESPOTSolver(bounds=IndependentBounds(DefaultPolicyLB(FunctionPolicy(calculate_lower_bound_policy_pomdp_planning_2D_action_space),max_depth=100),
-                            calculate_upper_bound_value_pomdp_planning_2D_action_space, check_terminal=true),K=50,D=100,T_max=0.3, tree_in_info=true,
-                            rng = rand_noise_generator_for_solver)
-
-    planner = POMDPs.solve(solver, golfcart_2D_action_space_pomdp)
-
     # initialize utilities
-    end_run = false    
+    end_run = false
     o_hist = []
     a_hist = []
-    
+
     max_plan_steps = 2*60*4
     planning_Dt = 0.5
     planning_rate = Rate(1/planning_Dt)
-  
+
     plan_step = 1
+
+    input = aspen
+    exp_details, pomdp_details, output = get_details_from_input_parameters(input)
+    env = generate_environment(input.env_length,input.env_breadth,input.obstacles)
+    exp_details.env = env
+    exp_details.human_goal_locations = get_human_goals(env)
+    veh = Vehicle(input.veh_start_x, input.veh_start_y, input.veh_start_theta, input.veh_start_v)
+    veh_sensor_data = vehicle_sensor(human_state[],Int64[],belief_over_human_goals[])
+    veh_goal = location(input.veh_goal_x,input.veh_goal_y)
+    veh_params = es_vehicle_parameters(input.veh_L,input.veh_max_speed,veh_goal)
+    env_humans, env_humans_params = generate_humans(env,veh,exp_details.human_start_v,exp_details.human_goal_locations,exp_details.num_humans_env,exp_details.user_defined_rng)
+    initial_sim_obj = simulator(env,veh,veh_params,veh_sensor_data,env_humans,env_humans_params,exp_details.simulator_time_step)
+
+    #Define POMDP, POMDP Solver and POMDP Planner
+    extended_space_pomdp = extended_space_POMDP_planner(pomdp_details.discount_factor,pomdp_details.min_safe_distance_from_human,
+                pomdp_details.human_collision_penalty,pomdp_details.min_safe_distance_from_obstacle,pomdp_details.obstacle_collision_penalty,
+                pomdp_details.radius_around_vehicle_goal,pomdp_details.goal_reached_reward,pomdp_details.max_vehicle_speed,pomdp_details.one_time_step,
+                pomdp_details.num_segments_in_one_time_step,pomdp_details.observation_discretization_length,pomdp_details.d_near,
+                pomdp_details.d_far,env)
+
+    pomdp_solver = DESPOTSolver(bounds=IndependentBounds(DefaultPolicyLB(FunctionPolicy(b->calculate_lower_bound(extended_space_pomdp, b)),max_depth=pomdp_details.tree_search_max_depth),
+                        calculate_upper_bound,check_terminal=true),K=pomdp_details.num_scenarios,D=pomdp_details.tree_search_max_depth,T_max=pomdp_details.planning_time,tree_in_info=true)
+    pomdp_planner = POMDPs.solve(pomdp_solver, extended_space_pomdp);
+
+
 
     while end_run == false
         println("\n--- --- ---")
@@ -116,42 +145,43 @@ function main()
 
         # 2.a: receive current state and belief
         obs_k = state_updater_client(true)
-        belief_dist_k = belief_updater_client(true)     # TO-DO: need to convert belief_array to actual belief object
+        belief_ros = belief_updater_client(true)     # TO-DO: need to convert belief_array to actual belief object
+        belief_dist_k = ros2pomdp_belief(belief_ros)
 
         # 3: update environment
-        env_k.cart.x = obs_k.state[1]
-        env_k.cart.y = obs_k.state[2]
-        env_k.cart.theta = obs_k.state[3]
-        env_k.cart.v = a_ros[1]
-        
+        veh_obj = Vehicle(obs_k.state[1],obs_k.state[2],obs_k.state[3],a_ros[1])
         ped_states_k = Array{human_state,1}()
-        ped_id = 1.0
+        ped_params_k = Array{human_parameters,1}()
+        ped_ids = Array{Int64,1}()
+        ped_id = 1
         for i in 4:2:length(obs_k.state)
-            ped = human_state(obs_k.state[i], obs_k.state[i+1], 1.0, env_k.goals[1], ped_id)
-            ped_id += 1
+            ped = human_state(obs_k.state[i], obs_k.state[i+1], 1.0, env_k.goals[1])
             push!(ped_states_k, ped)
+            push!(ped_params_k, human_parameters(ped_id))
+            push!(ped_ids, ped_id)
+            ped_id += 1
         end
 
-        env_k.complete_cart_lidar_data = ped_states_k
-        env_k.cart_lidar_data = ped_states_k
+        new_sensor_data = vehicle_sensor(ped_states_k, ped_ids, belief_dist_k)
+        new_sim_obj = simulator(env,veh_obj,veh_params,new_sensor_data,ped_states_k,ped_params_k,current_sim_obj.one_time_step)
 
-        dist_to_goal = sqrt((env_k.cart.x - env_k.cart.goal.x)^2 + (env_k.cart.y - env_k.cart.goal.y)^2)
-        if ((plan_step >= max_plan_steps) || (dist_to_goal <= 0.5))
+        dist_to_goal = sqrt((veh_obj.x - veh_params.goal.x)^2 + (veh_obj.y - veh_params.goal.y)^2)
+        if ((plan_step >= max_plan_steps) || (dist_to_goal <= 1.0))
             end_run = true
+            continue
         end
-        
+
         # 4: calculate action for next cycle with POMDP solver
-        state_k = [env_k.cart.x, env_k.cart.y, env_k.cart.theta]
-        params_k = [env_k.cart.v, env_k.cart.L, a[2]]
+        future_pred_time = 0.4
+        predicted_vehicle_state = propogate_vehicle(new_sim_obj.vehicle, new_sim_obj.vehicle_params,a_ros[2], a_ros[1], future_pred_time)
+        modified_vehicle_params = modify_vehicle_params(new_sim_obj.vehicle_params)
+        # nearby_humans = get_nearby_humans(new_sim_obj,pomdp_details.num_nearby_humans,pomdp_details.min_safe_distance_from_human,pomdp_details.cone_half_angle)
+        b = tree_search_scenario_parameters(predicted_vehicle_state.x,predicted_vehicle_state.y,predicted_vehicle_state.theta,predicted_vehicle_state.v,
+                            modified_vehicle_params, exp_details.human_goal_locations, ped_states_k, belief_dist_k, env.length, env.breadth, future_pred_time)
+        a_pomdp, info = action_info(pomdp_planner, b)
+        a_ros = pomdp2ros_action(a_pomdp, veh_obj.v, planning_Dt, veh_params.L)
 
-        env_k1 = deepcopy(env_k)
-        env_k1.cart.x, env_k1.cart.y, env_k1.cart.theta = last.(get_intermediate_points(state_k, planning_Dt, params_k));
-
-        b = POMDP_2D_action_space_state_distribution(env_k1, belief_k)        # creates struct
-        a_pomdp, info = action_info(planner, b)                               # (?): what is "info"?
-        a_ros = pomdp2ros_action(a_pomdp, env_k1.cart.v, planning_Dt, env_k1.cart.L)
-        
-        println("vehicle state @ t_k1: ", [env_k1.cart.x, env_k1.cart.y, env_k1.cart.theta])
+        println("vehicle state @ t_k1: ", [predicted_vehicle_state.x, predicted_vehicle_state.y,predicted_vehicle_state.theta])
         println("POMDP action @ t_k1: ", a_pomdp)
         println("ROS action @ t_k1: ", a_ros)
 
