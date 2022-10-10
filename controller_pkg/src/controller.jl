@@ -5,15 +5,15 @@ using BSON: @load, @save
 using Dates
 
 algs_path = "/home/adcl/Documents/marmot-algs/"
-include(algs_path * "HJB-planner/HJB_generator_functions.jl")
-include(algs_path * "HJB-planner/HJB_planner_functions.jl")
+# include(algs_path * "HJB-planner/HJB_generator_functions.jl")
+# include(algs_path * "HJB-planner/HJB_planner_functions.jl")
 
 han_path = "/home/adcl/Documents/human_aware_navigation/src/"
 include(han_path * "main.jl")
 # include(han_path * "utils.jl")
-# include(han_path * "two_d_action_space_pomdp.jl")
+# include(han_path * "pomdp_planning.jl")
 # include(han_path * "belief_tracker.jl")
-# include(han_path * "new_main_2d_action_space_pomdp.jl")
+# include(han_path * "main.jl")
 
 # ROS connections:
 #   - to state_updater node as CLIENT to state_updater service
@@ -141,6 +141,7 @@ function main()
         println("t_k = ", Dates.now())
 
         # 1: publish current action to ESC
+        a_ros = [0.0, 0.0]
         ack_publisher_client(a_ros)
 
         # 2.a: receive current state and belief

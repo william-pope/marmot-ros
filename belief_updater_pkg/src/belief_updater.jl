@@ -3,11 +3,13 @@
 using RobotOS
 
 han_path = "/home/adcl/Documents/human_aware_navigation/src/"
+include(han_path * "struct_definition.jl")
 include(han_path * "environment.jl")
 include(han_path * "utils.jl")
-include(han_path * "two_d_action_space_pomdp.jl")
+include(han_path * "pomdp_planning.jl")
 include(han_path * "belief_tracker.jl")
-include(han_path * "new_main_2d_action_space_pomdp.jl")
+include(han_path * "simulator.jl")
+include(han_path * "aspen_inputs.jl")
 
 # File Overview:
 # - requests state from state_updater, uses to update and store current belief internally (10 Hz)
@@ -19,7 +21,7 @@ include(han_path * "new_main_2d_action_space_pomdp.jl")
 #   - to controller node as PROVIDER of belief_updater service
 
 @rosimport state_updater_pkg.srv: UpdateState
-@rosimport belief_estimator_pkg.srv: UpdateBelief
+@rosimport belief_updater_pkg.srv: UpdateBelief
 
 rostypegen()
 using .state_updater_pkg.srv

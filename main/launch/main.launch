@@ -14,12 +14,12 @@
         <include file="$(find ackermann_cmd_mux)/launch/mux.launch" />
     </group>
 
-    <!-- <group ns="belief_updater">
-         <include file="$(find belief_updater_pkg)/launch/belief_updater.launch" />
-    </group> -->
-
-    <group ns="state_updater">
+     <group ns="state_updater">
          <include file="$(find state_updater_pkg)/launch/state_updater.launch" />
+    </group>
+
+    <group ns="belief_updater">
+         <include file="$(find belief_updater_pkg)/launch/belief_updater.launch" />
     </group>
 
     <group ns="controller">
